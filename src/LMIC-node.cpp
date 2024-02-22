@@ -51,12 +51,20 @@
  ******************************************************************************/
 
 #include "LMIC-node.h"
+#include <Adafruit_ADS1X15.h> 
+#include <Wire.h> 
 
 
 //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▄ █▀▀ █▀▀ ▀█▀ █▀█
 //  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▄ █▀▀ █ █  █  █ █
 //  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀   ▀▀▀ ▀▀▀ ▀▀  ▀▀▀   ▀▀  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀
 
+
+Adafruit_ADS1115 ads1;
+const float referenceVoltage = 4096; // because of GAIN_ONE
+uint16_t static seconds_since_last_uplink = 0;
+float static liters_since_last_uplink = 0;
+const uint16_t uplink_interval = 600; // DO_WORK_INTERVAL_SECONDS = 1
 
 const uint8_t payloadBufferLength = 4;    // Adjust to fit max payload length
 
@@ -693,10 +701,50 @@ lmic_tx_error_t scheduleUplink(uint8_t fPort, uint8_t* data, uint8_t dataLength,
 
 static volatile uint16_t counter_ = 0;
 
+void collectFlowEachSecond()
+{
+    int16_t digitalValue0 = ads1.readADC_SingleEnded(0); // A1 20mA = 31960 = 100C      4mA = 6312 = 0C
+    int16_t digitalValue2 = ads1.readADC_SingleEnded(2); // A2 20mA = 32315 = 300L/min  4mA = 6590 = 0L/min
+    // Calculate current
+    float ampere0 = (float)digitalValue0 / 32767 * (float)(referenceVoltage / 200);
+    float ampere2 = (float)digitalValue2 / 32767 * (float)(referenceVoltage / 200);
+
+    float temperature = (float)((digitalValue0 - 6312) * 100) / (float)(31960 - 6321);
+    float flow = (float)((digitalValue2 - 6590) * 300) / (float)(32315 - 6590);
+    Serial.print("Analog 0 Digital Value: ");
+    Serial.print(digitalValue0);
+    Serial.print(", Current: ");
+    Serial.print(ampere0, 2);
+    Serial.print(" mA");
+    Serial.print(", Temperature: ");
+    Serial.print(temperature, 1);
+    Serial.println(" C");
+
+    Serial.print("Analog 2 Digital Value: ");
+    Serial.print(digitalValue2);
+    Serial.print(", Current: ");
+    Serial.print(ampere2, 2);
+    Serial.print(" mA");
+    Serial.print(", Flow: ");
+    Serial.print(flow, 0);
+    Serial.println(" l/min");
+    Serial.println("");
+    int intFlow = (int)round(flow); //get rid of small errors
+    liters_since_last_uplink += ((float)intFlow / 60);
+    seconds_since_last_uplink++;
+
+    Serial.print("seconds_since_last_uplink: ");
+    Serial.print(seconds_since_last_uplink);
+    Serial.print(", liters_since_last_uplink: ");
+    Serial.print(liters_since_last_uplink, 2);
+    Serial.println("");
+    //return liters_since_last_uplink;
+}
+
 uint16_t getCounterValue()
 {
     // Increments counter and returns the new value.
-    delay(50);         // Fake this takes some time
+    //delay(50);         // Fake this takes some time
     return ++counter_;
 }
 
@@ -717,6 +765,8 @@ void processWork(ostime_t doWorkJobTimeStamp)
     // This is where the main work is performed like
     // reading sensor and GPS data and schedule uplink
     // messages if anything needs to be transmitted.
+
+    collectFlowEachSecond();
 
     // Skip processWork if using OTAA and still joining.
     if (LMIC.devaddr != 0)
@@ -762,14 +812,16 @@ void processWork(ostime_t doWorkJobTimeStamp)
                 printEvent(timestamp, "UL not scheduled", PrintTarget::Display);
             #endif
         }
-        else
+        else if (seconds_since_last_uplink >= uplink_interval)
         {
             // Prepare uplink payload.
             uint8_t fPort = 10;
             payloadBuffer[0] = counterValue >> 8;
             payloadBuffer[1] = counterValue & 0xFF;
-            uint8_t payloadLength = 2;
-
+            payloadBuffer[2] = (uint8_t)liters_since_last_uplink; // if more that 255, we can send a factor maybe
+            uint8_t payloadLength = 3;
+            seconds_since_last_uplink = 0;
+            liters_since_last_uplink = 0;
             scheduleUplink(fPort, payloadBuffer, payloadLength);
         }
     }
@@ -846,6 +898,9 @@ void setup()
 //  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀   ▀▀▀ ▀▀▀ ▀▀  ▀▀▀   ▀▀  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀
 
     // Place code for initializing sensors etc. here.
+   Wire.begin(21,22);  //
+   ads1.begin(0x48); 
+   ads1.setGain(GAIN_ONE); 
 
     resetCounter();
 
