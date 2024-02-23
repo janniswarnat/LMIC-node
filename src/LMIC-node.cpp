@@ -52,13 +52,37 @@
 
 #include "LMIC-node.h"
 #include <Adafruit_ADS1X15.h> 
-#include <Wire.h> 
+#include <Wire.h>
+#include <esp_now.h>
+#include <WiFi.h>
 
 
 //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▄ █▀▀ █▀▀ ▀█▀ █▀█
 //  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▄ █▀▀ █ █  █  █ █
 //  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀   ▀▀▀ ▀▀▀ ▀▀  ▀▀▀   ▀▀  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀
 
+// REPLACE WITH YOUR RECEIVER MAC Address
+uint8_t broadcastAddress[] = {0xC8, 0xC9, 0xA3, 0xC8, 0xCD, 0xCC};
+
+// Structure example to send data
+// Must match the receiver structure
+typedef struct struct_message {
+  //char a[32];
+  u_int8_t b;
+  //float c;
+  //bool d;
+} struct_message;
+
+// Create a struct_message called myData
+struct_message myData;
+
+esp_now_peer_info_t peerInfo;
+
+// callback when data is sent
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
 
 Adafruit_ADS1115 ads1;
 const float referenceVoltage = 4096; // because of GAIN_ONE
@@ -768,6 +792,22 @@ void processWork(ostime_t doWorkJobTimeStamp)
 
     collectFlowEachSecond();
 
+      // Set values to send
+  //strcpy(myData.a, "THIS IS A CHAR");
+  myData.b = (uint8_t)liters_since_last_uplink;
+  //myData.c = 1.2;
+  //myData.d = false;
+  
+  // Send message via ESP-NOW
+  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
+   
+  if (result == ESP_OK) {
+    serial.println("Sent with success");
+  }
+  else {
+    serial.println("Error sending the data");
+  }
+
     // Skip processWork if using OTAA and still joining.
     if (LMIC.devaddr != 0)
     {
@@ -876,6 +916,30 @@ void setup()
     #if defined(USE_SERIAL) || defined(USE_DISPLAY)
         printHeader();
     #endif
+ 
+  // Set device as a Wi-Fi Station
+  WiFi.mode(WIFI_STA);
+
+  // Init ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  // Once ESPNow is successfully Init, we will register for Send CB to
+  // get the status of Trasnmitted packet
+  esp_now_register_send_cb(OnDataSent);
+  
+  // Register peer
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 0;  
+  peerInfo.encrypt = false;
+  
+  // Add peer        
+  if (esp_now_add_peer(&peerInfo) != ESP_OK){
+    serial.println("Failed to add peer");
+    return;
+  }
 
     if (!hardwareInitSucceeded)
     {   
