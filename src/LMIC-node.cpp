@@ -61,22 +61,41 @@
 //  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▄ █▀▀ █ █  █  █ █
 //  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀   ▀▀▀ ▀▀▀ ▀▀  ▀▀▀   ▀▀  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀
 
-// REPLACE WITH YOUR RECEIVER MAC Address
+Adafruit_ADS1115 ads1;
+uint16_t static secondsInCurrentInterval = 0;
+float static litersInMeasurementInterval = 0;
+const uint16_t measurementInterval = 600;
+bool static newMeasurementIntervalStartedOnSender = false;
+uint8_t static secondsSinceLastESPNOWMessage = 255;
+const uint8_t payloadBufferLength = 4;    // Adjust to fit max payload length
+// Adjust according to your settings in the Keyence sensor menu
+const uint16_t maxTemperatureSetInKeyenceMenu = 100;
+const uint16_t maxFlowSetInKeyenceMenu = 30;
+// Adjust after using Keyence simulation (min / max values) to determine ADC values
+const uint16_t minADCValueTemperature = 6471;
+const uint16_t minADCValueFlow = 6266;
+const uint16_t maxADCValueTemperature = 32157;
+const uint16_t maxADCValueFlow = 31944;
+
+// REPLACE WITH YOUR ESPNOW RECEIVER MAC Address
 uint8_t broadcastAddress[] = {0xC8, 0xC9, 0xA3, 0xC8, 0xCD, 0xCC};
+
+#define max(a,b) ((a) > (b) ? (a) : (b))
+#define min(a,b) ((a) < (b) ? (a) : (b))
 
 // Structure example to send data
 // Must match the receiver structure
 typedef struct struct_message {
-  //char a[32];
-  u_int8_t b;
-  //float c;
-  //bool d;
+  u_int16_t litersInLastThreeMeasurementIntervals[3];
 } struct_message;
 
-// Create a struct_message called myData
-struct_message myData;
+// Create a struct_message called myData and initialize all values to 0
+struct_message myDataToSend = {0};
+struct_message myDataReceived = {0};
 
 esp_now_peer_info_t peerInfo;
+
+uint16_t numOfEspMessagesSentSinceStartup = 1;
 
 // callback when data is sent
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
@@ -84,14 +103,28 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
-Adafruit_ADS1115 ads1;
-const float referenceVoltage = 4096; // because of GAIN_ONE
-uint16_t static seconds_since_last_uplink = 0;
-float static liters_since_last_uplink = 0;
-const uint16_t uplink_interval = 600; // DO_WORK_INTERVAL_SECONDS = 1
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
+{
+    struct_message temp;
+    memcpy(&temp, incomingData, sizeof(temp));
 
-const uint8_t payloadBufferLength = 4;    // Adjust to fit max payload length
+    if(temp.litersInLastThreeMeasurementIntervals[0] < myDataReceived.litersInLastThreeMeasurementIntervals[0])
+    {
+      newMeasurementIntervalStartedOnSender = true;
+      myDataToSend = myDataReceived;
+     }
 
+    memcpy(&myDataReceived, incomingData, sizeof(myDataReceived));
+    secondsSinceLastESPNOWMessage = 0;
+    Serial.print("Bytes received: ");
+    Serial.println(len);
+    Serial.print("Liters in last three measurement intervals: ");
+    Serial.print(myDataReceived.litersInLastThreeMeasurementIntervals[0]);
+    Serial.print(", ");
+    Serial.print(myDataReceived.litersInLastThreeMeasurementIntervals[1]);
+    Serial.print(", ");
+    Serial.println(myDataReceived.litersInLastThreeMeasurementIntervals[2]);
+}
 
 //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▀ █▀█ █▀▄
 //  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▀ █ █ █ █
@@ -726,43 +759,47 @@ lmic_tx_error_t scheduleUplink(uint8_t fPort, uint8_t* data, uint8_t dataLength,
 static volatile uint16_t counter_ = 0;
 
 void collectFlowEachSecond()
-{
-    int16_t digitalValue0 = ads1.readADC_SingleEnded(0); // A1 20mA = 31960 = 100C      4mA = 6312 = 0C
-    int16_t digitalValue2 = ads1.readADC_SingleEnded(2); // A2 20mA = 32315 = 300L/min  4mA = 6590 = 0L/min
-    // Calculate current
-    float ampere0 = (float)digitalValue0 / 32767 * (float)(referenceVoltage / 200);
-    float ampere2 = (float)digitalValue2 / 32767 * (float)(referenceVoltage / 200);
+{   
+    int16_t digitalValue0 = min(ads1.readADC_SingleEnded(0), maxADCValueTemperature);
+    int16_t digitalValue2 = min(ads1.readADC_SingleEnded(2), maxADCValueFlow);
 
-    float temperature = (float)((digitalValue0 - 6312) * 100) / (float)(31960 - 6321);
-    float flow = (float)((digitalValue2 - 6590) * 300) / (float)(32315 - 6590);
+    float temperature = (float)((digitalValue0 - minADCValueTemperature) * 100) / (float)(maxADCValueTemperature-minADCValueTemperature);
+    float flow = (float)((digitalValue2 - minADCValueFlow) * 30) / (float)(maxADCValueFlow-minADCValueFlow);
     Serial.print("Analog 0 Digital Value: ");
     Serial.print(digitalValue0);
-    Serial.print(", Current: ");
-    Serial.print(ampere0, 2);
-    Serial.print(" mA");
     Serial.print(", Temperature: ");
     Serial.print(temperature, 1);
     Serial.println(" C");
 
     Serial.print("Analog 2 Digital Value: ");
     Serial.print(digitalValue2);
-    Serial.print(", Current: ");
-    Serial.print(ampere2, 2);
-    Serial.print(" mA");
     Serial.print(", Flow: ");
     Serial.print(flow, 0);
     Serial.println(" l/min");
-    Serial.println("");
-    int intFlow = (int)round(flow); //get rid of small errors
-    liters_since_last_uplink += ((float)intFlow / 60);
-    seconds_since_last_uplink++;
 
-    Serial.print("seconds_since_last_uplink: ");
-    Serial.print(seconds_since_last_uplink);
-    Serial.print(", liters_since_last_uplink: ");
-    Serial.print(liters_since_last_uplink, 2);
-    Serial.println("");
-    //return liters_since_last_uplink;
+    u_int16_t intFlow = (u_int16_t)round(flow); //get rid of small errors
+
+    litersInMeasurementInterval += ((float)intFlow / 60);
+    secondsInCurrentInterval++;
+
+    Serial.print("secondsInCurrentInterval: ");
+    Serial.print(secondsInCurrentInterval);
+    Serial.print(", litersInMeasurementInterval: ");
+    Serial.println(litersInMeasurementInterval, 2);
+    // set values to send via ESPNOW
+    myDataToSend.litersInLastThreeMeasurementIntervals[0] = (uint16_t)litersInMeasurementInterval;
+
+    // Send message via ESP-NOW
+    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&myDataToSend, sizeof(myDataToSend));
+
+    if (result == ESP_OK)
+    {
+        serial.println("Sent with success");
+    }
+    else
+    {
+        serial.println("Error sending the data");
+    }
 }
 
 uint16_t getCounterValue()
@@ -778,10 +815,9 @@ void resetCounter()
     counter_ = 0;
 }
 
-
 void processWork(ostime_t doWorkJobTimeStamp)
 {
-    // This function is called from the doWorkCallback() 
+    // This function is called from the doWorkCallback()
     // callback function when the doWork job is executed.
 
     // Uses globals: payloadBuffer and LMIC data structure.
@@ -790,23 +826,10 @@ void processWork(ostime_t doWorkJobTimeStamp)
     // reading sensor and GPS data and schedule uplink
     // messages if anything needs to be transmitted.
 
-    collectFlowEachSecond();
-
-      // Set values to send
-  //strcpy(myData.a, "THIS IS A CHAR");
-  myData.b = (uint8_t)liters_since_last_uplink;
-  //myData.c = 1.2;
-  //myData.d = false;
-  
-  // Send message via ESP-NOW
-  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
-   
-  if (result == ESP_OK) {
-    serial.println("Sent with success");
-  }
-  else {
-    serial.println("Error sending the data");
-  }
+    #ifdef USE_ADC
+        collectFlowEachSecond();
+    #endif
+    boolean receivingESPMessages = secondsSinceLastESPNOWMessage < 10;
 
     // Skip processWork if using OTAA and still joining.
     if (LMIC.devaddr != 0)
@@ -825,11 +848,14 @@ void processWork(ostime_t doWorkJobTimeStamp)
             // information better readable on the small display.
             display.clearLine(INTERVAL_ROW);
             display.setCursor(COL_0, INTERVAL_ROW);
-            display.print("I:");
-            display.print(doWorkIntervalSeconds);
-            display.print("s");        
-            display.print(" Ctr:");
-            display.print(counterValue);
+            display.print("");
+            display.print(receivingESPMessages);
+            display.print(" ");
+            display.print(myDataReceived.litersInLastThreeMeasurementIntervals[0]);
+            display.print(" ");
+            display.print(myDataReceived.litersInLastThreeMeasurementIntervals[1]);
+            display.print(" ");
+            display.print(myDataReceived.litersInLastThreeMeasurementIntervals[2]);
         #endif
         #ifdef USE_SERIAL
             printEvent(timestamp, "Input data collected", PrintTarget::Serial);
@@ -852,21 +878,34 @@ void processWork(ostime_t doWorkJobTimeStamp)
                 printEvent(timestamp, "UL not scheduled", PrintTarget::Display);
             #endif
         }
-        else if (seconds_since_last_uplink >= uplink_interval)
+        else if ((secondsInCurrentInterval >= measurementInterval) || newMeasurementIntervalStartedOnSender)
         {
             // Prepare uplink payload.
             uint8_t fPort = 10;
-            payloadBuffer[0] = counterValue >> 8;
-            payloadBuffer[1] = counterValue & 0xFF;
-            payloadBuffer[2] = (uint8_t)liters_since_last_uplink; // if more that 255, we can send a factor maybe
-            uint8_t payloadLength = 3;
-            seconds_since_last_uplink = 0;
-            liters_since_last_uplink = 0;
+            uint8_t statuses = 0;
+            if (receivingESPMessages)
+            {
+                statuses |= 1 << 0;
+            }
+            
+            payloadBuffer[0] = (myDataToSend.litersInLastThreeMeasurementIntervals[0]) >> 8;
+            payloadBuffer[1] = (myDataToSend.litersInLastThreeMeasurementIntervals[0]) & 0xFF;
+            payloadBuffer[2] = (myDataToSend.litersInLastThreeMeasurementIntervals[1]) >> 8;
+            payloadBuffer[3] = (myDataToSend.litersInLastThreeMeasurementIntervals[1]) & 0xFF;
+            payloadBuffer[4] = (myDataToSend.litersInLastThreeMeasurementIntervals[2]) >> 8;
+            payloadBuffer[5] = (myDataToSend.litersInLastThreeMeasurementIntervals[2]) & 0xFF;
+            uint8_t payloadLength = 7;
+
+            myDataToSend.litersInLastThreeMeasurementIntervals[2] = myDataToSend.litersInLastThreeMeasurementIntervals[1];
+            myDataToSend.litersInLastThreeMeasurementIntervals[1] = myDataToSend.litersInLastThreeMeasurementIntervals[0];
+            myDataToSend.litersInLastThreeMeasurementIntervals[0] = 0;
+            secondsInCurrentInterval = 0;
+            litersInMeasurementInterval = 0;
+            newMeasurementIntervalStartedOnSender = false;
             scheduleUplink(fPort, payloadBuffer, payloadLength);
         }
     }
-}    
- 
+}
 
 void processDownlink(ostime_t txCompleteTimestamp, uint8_t fPort, uint8_t* data, uint8_t dataLength)
 {
@@ -895,51 +934,58 @@ void processDownlink(ostime_t txCompleteTimestamp, uint8_t fPort, uint8_t* data,
 
 //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▀ █▀█ █▀▄
 //  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▀ █ █ █ █
-//  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀   ▀▀▀ ▀▀▀ ▀▀  ▀▀▀   ▀▀▀ ▀ ▀ ▀▀ 
+//  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀   ▀▀▀ ▀▀▀ ▀▀  ▀▀▀   ▀▀▀ ▀ ▀ ▀▀
 
-
-void setup() 
+void setup()
 {
     // boardInit(InitType::Hardware) must be called at start of setup() before anything else.
     bool hardwareInitSucceeded = boardInit(InitType::Hardware);
 
-    #ifdef USE_DISPLAY 
-        initDisplay();
-    #endif
+#ifdef USE_DISPLAY
+    initDisplay();
+#endif
 
-    #ifdef USE_SERIAL
-        initSerial(MONITOR_SPEED, WAITFOR_SERIAL_S);
-    #endif    
+#ifdef USE_SERIAL
+    initSerial(MONITOR_SPEED, WAITFOR_SERIAL_S);
+#endif
 
     boardInit(InitType::PostInitSerial);
 
-    #if defined(USE_SERIAL) || defined(USE_DISPLAY)
-        printHeader();
+#if defined(USE_SERIAL) || defined(USE_DISPLAY)
+    printHeader();
+#endif
+
+    // Set device as a Wi-Fi Station
+    WiFi.mode(WIFI_STA);
+
+    // Init ESP-NOW
+    if (esp_now_init() != ESP_OK)
+    {
+        serial.println("Error initializing ESP-NOW");
+        return;
+    }
+
+    // Once ESPNow is successfully Init, we will register for Send CB to
+    // get the status of Trasnmitted packet
+    #ifdef USE_ADC
+    esp_now_register_send_cb(OnDataSent);
+
+    // Register peer
+    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+
+    // Add peer
+    if (esp_now_add_peer(&peerInfo) != ESP_OK)
+    {
+        serial.println("Failed to add peer");
+        return;
+    }
     #endif
- 
-  // Set device as a Wi-Fi Station
-  WiFi.mode(WIFI_STA);
 
-  // Init ESP-NOW
-  if (esp_now_init() != ESP_OK) {
-    serial.println("Error initializing ESP-NOW");
-    return;
-  }
-
-  // Once ESPNow is successfully Init, we will register for Send CB to
-  // get the status of Trasnmitted packet
-  esp_now_register_send_cb(OnDataSent);
-  
-  // Register peer
-  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-  peerInfo.channel = 0;  
-  peerInfo.encrypt = false;
-  
-  // Add peer        
-  if (esp_now_add_peer(&peerInfo) != ESP_OK){
-    serial.println("Failed to add peer");
-    return;
-  }
+    #ifndef USE_ADC
+    esp_now_register_recv_cb(OnDataRecv);
+    #endif
 
     if (!hardwareInitSucceeded)
     {   
@@ -980,7 +1026,6 @@ void setup()
     // Schedule initial doWork job for immediate execution.
     os_setCallback(&doWorkJob, doWorkCallback);
 }
-
 
 void loop() 
 {
