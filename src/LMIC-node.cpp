@@ -62,11 +62,12 @@
 //  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀   ▀▀▀ ▀▀▀ ▀▀  ▀▀▀   ▀▀  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀
 
 Adafruit_ADS1115 ads1;
-uint16_t static secondsInCurrentInterval = 0;
-float static litersInMeasurementInterval = 0;
+uint16_t static volatile secondsInCurrentInterval = 0;
+float static volatile litersInMeasurementInterval = 0;
+int16_t static volatile maxDigitalValue2 = 0;
 const uint16_t measurementInterval = 600;
-bool static newMeasurementIntervalStartedOnSender = false;
-uint8_t static secondsSinceLastESPNOWMessage = 255;
+bool static volatile newMeasurementIntervalStartedOnSender = false;
+uint8_t static volatile secondsSinceLastESPNOWMessage = 255;
 const uint8_t payloadBufferLength = 4;    // Adjust to fit max payload length
 // Adjust according to your settings in the Keyence sensor menu
 const uint16_t maxTemperatureSetInKeyenceMenu = 100;
@@ -77,9 +78,11 @@ const uint16_t minADCValueFlow = 6266;
 const uint16_t maxADCValueTemperature = 32157;
 const uint16_t maxADCValueFlow = 31944;
 
-// REPLACE WITH YOUR ESPNOW RECEIVER MAC Address
-uint8_t broadcastAddress[] = {0xC8, 0xC9, 0xA3, 0xC8, 0xCD, 0xCC};
+const char* ssid = WIFI_SSID;
+const char* password = WIFI_PASSWORD;
 
+// REPLACE WITH YOUR ESPNOW RECEIVER MAC Address
+const uint8_t broadcastAddress[] = {0xC8, 0xC9, 0xA3, 0xC8, 0xCD, 0xCC};
 #define max(a,b) ((a) > (b) ? (a) : (b))
 #define min(a,b) ((a) < (b) ? (a) : (b))
 
@@ -94,8 +97,6 @@ struct_message myDataToSend = {0};
 struct_message myDataReceived = {0};
 
 esp_now_peer_info_t peerInfo;
-
-uint16_t numOfEspMessagesSentSinceStartup = 1;
 
 // callback when data is sent
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
@@ -762,7 +763,10 @@ void collectFlowEachSecond()
 {   
     int16_t digitalValue0 = min(ads1.readADC_SingleEnded(0), maxADCValueTemperature);
     int16_t digitalValue2 = min(ads1.readADC_SingleEnded(2), maxADCValueFlow);
-
+    if(digitalValue2 > maxDigitalValue2)
+    {
+        maxDigitalValue2 = digitalValue2;
+    }
     float temperature = (float)((digitalValue0 - minADCValueTemperature) * 100) / (float)(maxADCValueTemperature-minADCValueTemperature);
     float flow = (float)((digitalValue2 - minADCValueFlow) * 30) / (float)(maxADCValueFlow-minADCValueFlow);
     Serial.print("Analog 0 Digital Value: ");
@@ -773,6 +777,8 @@ void collectFlowEachSecond()
 
     Serial.print("Analog 2 Digital Value: ");
     Serial.print(digitalValue2);
+    Serial.print(", Max Digital Value: ");
+    Serial.print(maxDigitalValue2);
     Serial.print(", Flow: ");
     Serial.print(flow, 0);
     Serial.println(" l/min");
@@ -858,7 +864,17 @@ void processWork(ostime_t doWorkJobTimeStamp)
             display.print(myDataReceived.litersInLastThreeMeasurementIntervals[2]);
         #endif
         #ifdef USE_SERIAL
-            printEvent(timestamp, "Input data collected", PrintTarget::Serial);
+            //printEvent(timestamp, "Input data collected", PrintTarget::Serial);
+            if (WiFi.status() == WL_CONNECTED)
+            {
+                String status = "Connected to WiFi. IP address: " + WiFi.localIP().toString();
+                printEvent(timestamp, status.c_str(), PrintTarget::Serial);
+            }
+            else
+            {
+                printEvent(timestamp, "Not connected to WiFi", PrintTarget::Serial);
+            }
+
             printSpaces(serial, MESSAGE_INDENT);
             serial.print(F("COUNTER value: "));
             serial.println(counterValue);
@@ -986,6 +1002,35 @@ void setup()
     #ifndef USE_ADC
     esp_now_register_recv_cb(OnDataRecv);
     #endif
+
+    // Attempt to connect to Wifi network:
+    serial.print("Connecting to ");
+    Serial.println(ssid);
+  
+    WiFi.begin(ssid, password);
+  
+    uint8_t maxConnectionAttempts = 10;
+    uint8_t attempts = 0;
+
+    while (attempts <= maxConnectionAttempts && (WiFi.status() != WL_CONNECTED)) {
+        delay(500);
+        attempts++;
+        serial.print(".");
+    }
+
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        serial.println("");
+        serial.println("WiFi connected");
+        serial.println("IP address: ");
+        serial.println(WiFi.localIP());
+    }
+    else
+    {
+        serial.println("");
+        serial.println("Failed to connect to WiFi, retry...");
+        WiFi.begin(ssid, password);
+    }
 
     if (!hardwareInitSucceeded)
     {   

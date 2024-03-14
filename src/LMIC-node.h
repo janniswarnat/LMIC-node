@@ -81,6 +81,7 @@ enum class ActivationMode {OTAA, ABP};
 
 #include BSFILE // Include Board Support File
 #include "../keyfiles/lorawan-keys.h"
+#include "../keyfiles/wifi-credentials.h"
 
     
 #if defined(ABP_ACTIVATION) && defined(OTAA_ACTIVATION)
