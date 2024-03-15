@@ -926,11 +926,10 @@ void processWork(ostime_t doWorkJobTimeStamp)
 #ifdef USE_ADC
             myDataToSend.litersInLastThreeMeasurementIntervals[2] = myDataToSend.litersInLastThreeMeasurementIntervals[1];
             myDataToSend.litersInLastThreeMeasurementIntervals[1] = myDataToSend.litersInLastThreeMeasurementIntervals[0];
-            myDataToSend.litersInLastThreeMeasurementIntervals[0] = 0;
             secondsInCurrentInterval = 0;
             litersInMeasurementInterval = 0;
 #endif
-
+            myDataToSend.litersInLastThreeMeasurementIntervals[0] = 0;
 #ifndef USE_ADC
             esp_now_register_recv_cb(OnDataRecv);
 #endif
