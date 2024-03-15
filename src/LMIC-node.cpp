@@ -60,7 +60,7 @@
 //  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▄ █▀▀ █ █  █  █ █
 //  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀   ▀▀▀ ▀▀▀ ▀▀  ▀▀▀   ▀▀  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀
 
-const uint8_t payloadBufferLength = 4; // Adjust to fit max payload length
+const uint8_t payloadBufferLength = 7; // Adjust to fit max payload length
 boolean sendOutMyDataToSend = false;
 
 // Structure example to send data
@@ -68,6 +68,7 @@ boolean sendOutMyDataToSend = false;
 typedef struct struct_message
 {
     u_int16_t litersInLastThreeMeasurementIntervals[3];
+    boolean sentFromCollectFlowEachSecond;
 } struct_message;
 
 struct_message myDataToSend = {0};
@@ -97,6 +98,7 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
     Serial.print("\r\nLast Packet Send Status:\t");
     Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+    myDataToSend.sentFromCollectFlowEachSecond = false;
 }
 #endif
 
@@ -108,12 +110,27 @@ const char *password = WIFI_PASSWORD;
 #ifndef USE_ADC
 uint8_t static secondsSinceLastESPNOWMessage = 255;
 boolean static firstESPMessageReceived = false;
-
+const uint8_t senderAddress[] = {0x98, 0xCD, 0xAC, 0xBF, 0x90, 0x98};
 struct_message myDataReceived = {0};
 
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
 {
+    if (memcmp(mac, senderAddress, 6) == 0)
+    {
+        Serial.println("MAC address of sender is fine");
+    }
+    else
+    {
+        Serial.println("Sender is unknown, ignore message");
+        return;
+    }
     memcpy(&myDataReceived, incomingData, sizeof(myDataReceived));
+
+    if(!myDataReceived.sentFromCollectFlowEachSecond){
+        Serial.println("Weird message, ignore message");
+        return;
+    }
+
     secondsSinceLastESPNOWMessage = 0;
     Serial.print("Bytes received: ");
     Serial.println(len);
@@ -797,6 +814,7 @@ void collectFlowEachSecond()
     myDataToSend.litersInLastThreeMeasurementIntervals[0] = (uint16_t)litersInMeasurementInterval;
 
     // Send message via ESP-NOW
+    myDataToSend.sentFromCollectFlowEachSecond = true;
     esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&myDataToSend, sizeof(myDataToSend));
 
     if (result == ESP_OK)
@@ -927,6 +945,7 @@ void processWork(ostime_t doWorkJobTimeStamp)
             payloadBuffer[3] = (myDataToSend.litersInLastThreeMeasurementIntervals[1]) & 0xFF;
             payloadBuffer[4] = (myDataToSend.litersInLastThreeMeasurementIntervals[2]) >> 8;
             payloadBuffer[5] = (myDataToSend.litersInLastThreeMeasurementIntervals[2]) & 0xFF;
+            payloadBuffer[6] = statuses;
             uint8_t payloadLength = 7;
 
             sendOutMyDataToSend = false;
