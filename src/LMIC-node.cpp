@@ -107,6 +107,7 @@ const char *password = WIFI_PASSWORD;
 
 #ifndef USE_ADC
 uint8_t static secondsSinceLastESPNOWMessage = 255;
+boolean static firstESPMessageReceived = false;
 
 struct_message myDataReceived = {0};
 
@@ -116,14 +117,21 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
     secondsSinceLastESPNOWMessage = 0;
     Serial.print("Bytes received: ");
     Serial.println(len);
-    Serial.print("Liters in last three measurement intervals: ");
+    Serial.print("myDataReceived: ");
     Serial.print(myDataReceived.litersInLastThreeMeasurementIntervals[0]);
     Serial.print(", ");
     Serial.print(myDataReceived.litersInLastThreeMeasurementIntervals[1]);
     Serial.print(", ");
     Serial.println(myDataReceived.litersInLastThreeMeasurementIntervals[2]);
 
-    if (myDataReceived.litersInLastThreeMeasurementIntervals[0] < myDataToSend.litersInLastThreeMeasurementIntervals[0])
+    if (!firstESPMessageReceived)
+    {
+        firstESPMessageReceived = true;
+        myDataToSend = myDataReceived;
+        return;
+    }
+
+    if ((myDataReceived.litersInLastThreeMeasurementIntervals[0] < myDataToSend.litersInLastThreeMeasurementIntervals[0]) || (myDataReceived.litersInLastThreeMeasurementIntervals[1] != myDataToSend.litersInLastThreeMeasurementIntervals[1]) || (myDataReceived.litersInLastThreeMeasurementIntervals[2] != myDataToSend.litersInLastThreeMeasurementIntervals[2]))
     {
         sendOutMyDataToSend = true;
         esp_now_unregister_recv_cb();
@@ -926,11 +934,12 @@ void processWork(ostime_t doWorkJobTimeStamp)
 #ifdef USE_ADC
             myDataToSend.litersInLastThreeMeasurementIntervals[2] = myDataToSend.litersInLastThreeMeasurementIntervals[1];
             myDataToSend.litersInLastThreeMeasurementIntervals[1] = myDataToSend.litersInLastThreeMeasurementIntervals[0];
+            myDataToSend.litersInLastThreeMeasurementIntervals[0] = 0;
             secondsInCurrentInterval = 0;
             litersInMeasurementInterval = 0;
 #endif
-            myDataToSend.litersInLastThreeMeasurementIntervals[0] = 0;
 #ifndef USE_ADC
+            myDataToSend = myDataReceived;
             esp_now_register_recv_cb(OnDataRecv);
 #endif
             scheduleUplink(fPort, payloadBuffer, payloadLength);
