@@ -80,7 +80,9 @@ struct_message myDataToSend = {0};
 Adafruit_ADS1115 ads1;
 uint16_t static secondsInCurrentInterval = 0;
 float static litersInMeasurementInterval = 0;
-int16_t static maxDigitalValue2 = 0;
+//float static maxFlow = 0;
+//float static maxLitersInMeasurementInterval = 0;
+//int16_t static maxDigitalValue2 = 0;
 const uint16_t measurementInterval = 600;
 // Adjust according to your settings in the Keyence sensor menu
 const uint16_t maxTemperatureSetInKeyenceMenu = 100;
@@ -782,12 +784,20 @@ void collectFlowEachSecond()
 {
     int16_t digitalValue0 = min(ads1.readADC_SingleEnded(0), maxADCValueTemperature);
     int16_t digitalValue2 = min(ads1.readADC_SingleEnded(2), maxADCValueFlow);
-    if (digitalValue2 > maxDigitalValue2)
-    {
-        maxDigitalValue2 = digitalValue2;
-    }
+    // if (digitalValue2 > maxDigitalValue2)
+    // {
+    //     maxDigitalValue2 = digitalValue2;
+    // }
+    
     float temperature = (float)((digitalValue0 - minADCValueTemperature) * 100) / (float)(maxADCValueTemperature - minADCValueTemperature);
     float flow = (float)((digitalValue2 - minADCValueFlow) * 30) / (float)(maxADCValueFlow - minADCValueFlow);
+
+    flow = max(0, flow); //flow can be negative, especially when sensor is turned on
+    
+    // if(flow > maxFlow){
+    //     maxFlow = flow;
+    // }
+    
     Serial.print("Analog 0 Digital Value: ");
     Serial.print(digitalValue0);
     Serial.print(", Temperature: ");
@@ -796,20 +806,30 @@ void collectFlowEachSecond()
 
     Serial.print("Analog 2 Digital Value: ");
     Serial.print(digitalValue2);
-    Serial.print(", Max Digital Value: ");
-    Serial.print(maxDigitalValue2);
+    // Serial.print(", Max Digital Value: ");
+    // Serial.print(maxDigitalValue2);
     Serial.print(", Flow: ");
     Serial.print(flow, 0);
+    // Serial.println(", maxFlow: ");
+    // Serial.println(maxFlow, 0);
     Serial.println(" l/min");
 
     u_int16_t intFlow = (u_int16_t)round(flow); // get rid of small errors
 
     litersInMeasurementInterval += ((float)intFlow / 60);
+
+    // if(litersInMeasurementInterval > maxLitersInMeasurementInterval){
+    //     maxLitersInMeasurementInterval = litersInMeasurementInterval;
+    // }
+
     secondsInCurrentInterval++;
     Serial.print("secondsInCurrentInterval: ");
     Serial.print(secondsInCurrentInterval);
     Serial.print(", litersInMeasurementInterval: ");
     Serial.println(litersInMeasurementInterval, 2);
+    // Serial.print(", maxLitersInMeasurementInterval: ");
+    // Serial.println(maxLitersInMeasurementInterval, 2);
+    
     // set values to send via ESPNOW
     myDataToSend.litersInLastThreeMeasurementIntervals[0] = (uint16_t)litersInMeasurementInterval;
 
