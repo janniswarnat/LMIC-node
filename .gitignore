@@ -11,6 +11,7 @@
 keyfiles/**
 # Except following example file
 !keyfiles/lorawan-keys_example.h
+!keyfiles/wifi-credentials_example.h
 
 # Exclude any LoRaWAN key files with following pattern
 *lorawan-keys.h
