@@ -7,6 +7,8 @@
 .pioenvs
 .piolibdeps
 
+.idea
+
 # Exclude all contents from any keyfiles folder
 keyfiles/**
 # Except following example file
