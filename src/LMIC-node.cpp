@@ -88,10 +88,10 @@ const uint16_t measurementInterval = 600;
 const uint16_t maxTemperatureSetInKeyenceMenu = 100;
 const uint16_t maxFlowSetInKeyenceMenu = 30;
 // Adjust after using Keyence simulation (min / max values) to determine ADC values
-const uint16_t minADCValueTemperature = 6471;
-const uint16_t minADCValueFlow = 6266;
-const uint16_t maxADCValueTemperature = 32157;
-const uint16_t maxADCValueFlow = 31944;
+const uint16_t minADCValueTemperature = 6441; //FD-H20, FD-H32 was: 6471
+const uint16_t minADCValueFlow = 6242; //FD-H20, FD-H32 was: 6266
+const uint16_t maxADCValueTemperature = 32142; //FD-H20, FD-H32 was: 32157
+const uint16_t maxADCValueFlow = 31910; //FD-H20, FD-H32 was: 31944
 // REPLACE WITH YOUR ESPNOW RECEIVER MAC Address
 const uint8_t broadcastAddress[] = {0xC8, 0xC9, 0xA3, 0xC8, 0xCD, 0xCC};
 esp_now_peer_info_t peerInfo;
@@ -814,9 +814,9 @@ void collectFlowEachSecond()
     // Serial.println(maxFlow, 0);
     Serial.println(" l/min");
 
-    u_int16_t intFlow = (u_int16_t)round(flow); // get rid of small errors
+    //u_int16_t intFlow = (u_int16_t)round(flow); // get rid of small errors
 
-    litersInMeasurementInterval += ((float)intFlow / 60);
+    litersInMeasurementInterval += ((float)flow / 60);
 
     // if(litersInMeasurementInterval > maxLitersInMeasurementInterval){
     //     maxLitersInMeasurementInterval = litersInMeasurementInterval;
