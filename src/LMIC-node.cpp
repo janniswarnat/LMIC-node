@@ -814,13 +814,7 @@ void collectFlowEachSecond()
     // Serial.println(maxFlow, 0);
     Serial.println(" l/min");
 
-    //u_int16_t intFlow = (u_int16_t)round(flow); // get rid of small errors
-
-    litersInMeasurementInterval += ((float)flow / 60);
-
-    // if(litersInMeasurementInterval > maxLitersInMeasurementInterval){
-    //     maxLitersInMeasurementInterval = litersInMeasurementInterval;
-    // }
+    litersInMeasurementInterval += roundf(flow * 10) / 10;
 
     secondsInCurrentInterval++;
     Serial.print("secondsInCurrentInterval: ");
@@ -831,7 +825,7 @@ void collectFlowEachSecond()
     // Serial.println(maxLitersInMeasurementInterval, 2);
     
     // set values to send via ESPNOW
-    myDataToSend.litersInLastThreeMeasurementIntervals[0] = (uint16_t)litersInMeasurementInterval;
+    myDataToSend.litersInLastThreeMeasurementIntervals[0] = (uint16_t)(roundf(litersInMeasurementInterval));
 
     // Send message via ESP-NOW
     myDataToSend.sentFromCollectFlowEachSecond = true;
