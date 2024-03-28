@@ -814,7 +814,7 @@ void collectFlowEachSecond()
     // Serial.println(maxFlow, 0);
     Serial.println(" l/min");
 
-    litersInMeasurementInterval += roundf(flow * 10) / 10;
+    litersInMeasurementInterval += roundf(flow * 10) / 10 / 60; // l/s
 
     secondsInCurrentInterval++;
     Serial.print("secondsInCurrentInterval: ");
