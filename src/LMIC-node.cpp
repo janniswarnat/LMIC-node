@@ -62,7 +62,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <time.h>
+#include <ezTime.h>
 #endif
 
 //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▄ █▀▀ █▀▀ ▀█▀ █▀█
@@ -84,14 +84,15 @@ struct_message myDataToSend = {0};
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
+uint16_t static startOfCurrentInterval = millis() / 1000;
+const uint16_t measurementInterval = 600;
+
 #ifdef USE_ADC
 Adafruit_ADS1115 ads1;
-uint16_t static secondsInCurrentInterval = 0;
 float static litersInMeasurementInterval = 0;
 // float static maxFlow = 0;
 // float static maxLitersInMeasurementInterval = 0;
 // int16_t static maxDigitalValue2 = 0;
-const uint16_t measurementInterval = 600;
 // Adjust according to your settings in the Keyence sensor menu
 const uint16_t maxTemperatureSetInKeyenceMenu = 100;
 const uint16_t maxFlowSetInKeyenceMenu = 30;
@@ -118,21 +119,100 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASSWORD;
 const char *bearerToken = BEARER_TOKEN;
+Timezone Berlin;
+
+void WiFiEvent(WiFiEvent_t event)
+{
+    switch (event)
+    {
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+        Serial.println("WiFi lost connection. Attempting to reconnect...");
+        WiFi.begin(ssid, password);
+        break;
+    default:
+        break;
+    }
+}
 
 void printLocalTime()
 {
-    struct tm timeinfo;
-    if (!getLocalTime(&timeinfo))
+    String dateTime = Berlin.dateTime("l, F d Y H:i:s");
+    if (dateTime == "")
     {
         Serial.println("Failed to obtain time");
         return;
     }
-    Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+    Serial.print("Location: " + Berlin.getTimezoneName());
+    // Serial.print(", Olson: "+Berlin.getOlson());
+    Serial.println(", Time: " + Berlin.dateTime());
 }
+
+void sendOutViaHttp(uint16_t value)
+{
+    HTTPClient http;
+
+    http.begin("https://data.digitalzentrum-lr.de/api/data/push"); // Specify destination for HTTP request
+    http.addHeader("Content-Type", "application/json");            // Specify content-type header
+    http.addHeader("Authorization", bearerToken);                  // Specify authorization header
+
+    // Create a JSON object
+    JsonDocument jsonPayload;
+
+    jsonPayload["id"] = "unique-id";
+    jsonPayload["source"] = "post-request-test";
+    jsonPayload["name"] = "Post Request Test";
+    jsonPayload["user"] = "admin_cw";
+
+    JsonObject meta = jsonPayload.createNestedObject("meta");
+
+    JsonArray valueTypes = jsonPayload.createNestedArray("valueTypes");
+    JsonObject valueType1 = valueTypes.createNestedObject();
+    valueType1["name"] = "Number Example";
+    // valueType1["unit"] = "s";
+    valueType1["type"] = "Number";
+
+    JsonArray values = jsonPayload.createNestedArray("values");
+    JsonObject value1 = values.createNestedObject();
+
+    unsigned long now = Berlin.now();
+
+    value1["date"] = now * 1000LL;
+    JsonArray value1_values = value1.createNestedArray("value");
+    value1_values.add(value);
+
+    // Convert JSON object into a string
+    String jsonString;
+    serializeJson(jsonPayload, jsonString);
+
+    unsigned long startTime = millis();           // Record the start time
+    int httpResponseCode = http.POST(jsonString); // Send the actual POST request
+
+    if (httpResponseCode > 0)
+    {
+        String response = http.getString(); // Get the response to the request
+
+        unsigned long endTime = millis();             // Record the end time
+        unsigned long duration = endTime - startTime; // Calculate the duration
+
+        Serial.println(httpResponseCode); // Print return code
+        Serial.println(response);         // Print request answer
+        Serial.print(duration);
+        Serial.println(" ms"); // Print the duration
+    }
+    else
+    {
+
+        Serial.print("Error on sending POST: ");
+        Serial.println(httpResponseCode);
+    }
+
+    http.end(); // Free resources
+}
+
 #endif
 
 #ifdef RECEIVE_ESPNOW
-uint8_t static secondsSinceLastESPNOWMessage = 255;
+uint8_t static workDoneSinceLastESPNOWMessage = 255;
 boolean static firstESPMessageReceived = false;
 const uint8_t senderAddress[] = {0x98, 0xCD, 0xAC, 0xBF, 0x90, 0x98};
 struct_message myDataReceived = {0};
@@ -150,7 +230,7 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
     }
     memcpy(&myDataReceived, incomingData, sizeof(myDataReceived));
 
-    secondsSinceLastESPNOWMessage = 0;
+    workDoneSinceLastESPNOWMessage = 0;
     Serial.print("Bytes received: ");
     Serial.println(len);
     Serial.print("myDataReceived: ");
@@ -833,9 +913,9 @@ void collectFlowEachSecond()
 
     litersInMeasurementInterval += roundf(flow * 10) / 10 / 60; // l/s
 
-    secondsInCurrentInterval++;
-    Serial.print("secondsInCurrentInterval: ");
-    Serial.print(secondsInCurrentInterval);
+    Serial.print("Seconds since start of current measurement interval: ");
+    unsigned long secondsSinceStart = millis() / 1000;
+    Serial.print(secondsSinceStart - startOfCurrentInterval);
     Serial.print(", litersInMeasurementInterval: ");
     Serial.println(litersInMeasurementInterval, 2);
     // Serial.print(", maxLitersInMeasurementInterval: ");
@@ -889,7 +969,7 @@ void processWork(ostime_t doWorkJobTimeStamp)
 #endif
 
 #ifdef RECEIVE_ESPNOW
-    boolean receivingESPMessages = secondsSinceLastESPNOWMessage < 10;
+    boolean receivingESPMessages = workDoneSinceLastESPNOWMessage < 10;
     display.print("");
     display.print(receivingESPMessages);
     display.print(" ");
@@ -923,8 +1003,9 @@ void processWork(ostime_t doWorkJobTimeStamp)
     serial.println(counterValue);
 #endif
 
-#ifdef USE_ADC
-    if (secondsInCurrentInterval >= measurementInterval)
+#if defined(USE_ADC) || defined(USE_WIFI)
+    unsigned long secondsSinceStart = millis() / 1000;
+    if ((secondsSinceStart - startOfCurrentInterval) >= measurementInterval)
     {
         sendOutMyDataToSend = true;
     }
@@ -934,70 +1015,10 @@ void processWork(ostime_t doWorkJobTimeStamp)
     if (WiFi.status() == WL_CONNECTED)
     {
         String status = "Connected to WiFi. IP address: " + WiFi.localIP().toString() + ", MAC: " + WiFi.macAddress();
+        printLocalTime();
 #ifdef USE_SERIAL
         printEvent(timestamp, status.c_str(), PrintTarget::Serial);
 #endif
-        HTTPClient http;
-
-        http.begin("https://data.digitalzentrum-lr.de/api/data/push"); // Specify destination for HTTP request
-        http.addHeader("Content-Type", "application/json");            // Specify content-type header
-        http.addHeader("Authorization", bearerToken);                  // Specify authorization header
-
-        // Create a JSON object
-        StaticJsonDocument<512> doc;
-
-        doc["id"] = "unique-id";
-        doc["source"] = "post-request-test";
-        doc["name"] = "Post Request Test";
-        doc["user"] = "admin_cw";
-
-        JsonObject meta = doc.createNestedObject("meta");
-
-        JsonArray valueTypes = doc.createNestedArray("valueTypes");
-        JsonObject valueType1 = valueTypes.createNestedObject();
-        valueType1["name"] = "Number Example";
-        valueType1["unit"] = "s";
-        valueType1["type"] = "Number";
-
-        JsonArray values = doc.createNestedArray("values");
-        JsonObject value1 = values.createNestedObject();
-
-        time_t now;
-        time(&now);
-
-        value1["date"] = now * 1000LL;
-        JsonArray value1_values = value1.createNestedArray("value");
-        value1_values.add(counterValue);
-
-        // Convert JSON object into a string
-        String jsonString;
-        serializeJson(doc, jsonString);
-
-        int httpResponseCode = http.POST(jsonString); // Send the actual POST request
-
-        if (httpResponseCode > 0)
-        {
-
-            unsigned long startTime = millis(); // Record the start time
-
-            String response = http.getString(); // Get the response to the request
-
-            unsigned long endTime = millis();             // Record the end time
-            unsigned long duration = endTime - startTime; // Calculate the duration
-
-            Serial.println(httpResponseCode); // Print return code
-            Serial.println(response);         // Print request answer
-            Serial.print(duration);
-            Serial.println(" ms"); // Print the duration
-        }
-        else
-        {
-
-            Serial.print("Error on sending POST: ");
-            Serial.println(httpResponseCode);
-        }
-
-        http.end(); // Free resources
     }
     else
     {
@@ -1008,60 +1029,68 @@ void processWork(ostime_t doWorkJobTimeStamp)
     }
 #endif
 
-    // Skip processWork if using OTAA and still joining.
-    if (LMIC.devaddr != 0)
+    if (sendOutMyDataToSend)
     {
+        sendOutMyDataToSend = false;
+        startOfCurrentInterval = millis() / 1000;
+#ifdef USE_WIFI
+        sendOutViaHttp(myDataToSend.litersInLastThreeMeasurementIntervals[0]);
+#endif
 
-        // For simplicity LMIC-node will try to send an uplink
-        // message every time processWork() is executed.
-
-        // Schedule uplink message if possible
-        if (LMIC.opmode & OP_TXRXPEND)
+        // Skip processWork if using OTAA and still joining.
+        if (LMIC.devaddr != 0)
         {
+
+            // For simplicity LMIC-node will try to send an uplink
+            // message every time processWork() is executed.
+
+            // Schedule uplink message if possible
+
+            if (LMIC.opmode & OP_TXRXPEND)
+            {
 // TxRx is currently pending, do not send.
 #ifdef USE_SERIAL
-            printEvent(timestamp, "Uplink not scheduled because TxRx pending", PrintTarget::Serial);
+                printEvent(timestamp, "Uplink not scheduled because TxRx pending", PrintTarget::Serial);
 #endif
 #ifdef USE_DISPLAY
-            printEvent(timestamp, "UL not scheduled", PrintTarget::Display);
+                printEvent(timestamp, "UL not scheduled", PrintTarget::Display);
 #endif
-        }
-        else if (sendOutMyDataToSend)
-        {
-            // Prepare uplink payload.
-            uint8_t fPort = 10;
-            uint8_t statuses = 0;
+            }
+            else
+            {
+                // Prepare uplink payload.
+                uint8_t fPort = 10;
+                uint8_t statuses = 0;
 
 #ifdef RECEIVE_ESPNOW
-            if (receivingESPMessages)
-            {
-                statuses |= 1 << 0;
-            }
+                if (receivingESPMessages)
+                {
+                    statuses |= 1 << 0;
+                }
 #endif
 
-            payloadBuffer[0] = (myDataToSend.litersInLastThreeMeasurementIntervals[0]) >> 8;
-            payloadBuffer[1] = (myDataToSend.litersInLastThreeMeasurementIntervals[0]) & 0xFF;
-            payloadBuffer[2] = (myDataToSend.litersInLastThreeMeasurementIntervals[1]) >> 8;
-            payloadBuffer[3] = (myDataToSend.litersInLastThreeMeasurementIntervals[1]) & 0xFF;
-            payloadBuffer[4] = (myDataToSend.litersInLastThreeMeasurementIntervals[2]) >> 8;
-            payloadBuffer[5] = (myDataToSend.litersInLastThreeMeasurementIntervals[2]) & 0xFF;
-            payloadBuffer[6] = statuses;
-            uint8_t payloadLength = 7;
-
-            sendOutMyDataToSend = false;
+                payloadBuffer[0] = (myDataToSend.litersInLastThreeMeasurementIntervals[0]) >> 8;
+                payloadBuffer[1] = (myDataToSend.litersInLastThreeMeasurementIntervals[0]) & 0xFF;
+                payloadBuffer[2] = (myDataToSend.litersInLastThreeMeasurementIntervals[1]) >> 8;
+                payloadBuffer[3] = (myDataToSend.litersInLastThreeMeasurementIntervals[1]) & 0xFF;
+                payloadBuffer[4] = (myDataToSend.litersInLastThreeMeasurementIntervals[2]) >> 8;
+                payloadBuffer[5] = (myDataToSend.litersInLastThreeMeasurementIntervals[2]) & 0xFF;
+                payloadBuffer[6] = statuses;
+                uint8_t payloadLength = 7;
 
 #ifdef USE_ADC
-            myDataToSend.litersInLastThreeMeasurementIntervals[2] = myDataToSend.litersInLastThreeMeasurementIntervals[1];
-            myDataToSend.litersInLastThreeMeasurementIntervals[1] = myDataToSend.litersInLastThreeMeasurementIntervals[0];
-            myDataToSend.litersInLastThreeMeasurementIntervals[0] = 0;
-            secondsInCurrentInterval = 0;
-            litersInMeasurementInterval = 0;
+                myDataToSend.litersInLastThreeMeasurementIntervals[2] = myDataToSend.litersInLastThreeMeasurementIntervals[1];
+                myDataToSend.litersInLastThreeMeasurementIntervals[1] = myDataToSend.litersInLastThreeMeasurementIntervals[0];
+                myDataToSend.litersInLastThreeMeasurementIntervals[0] = 0;
+                litersInMeasurementInterval = 0;
 #endif
 #ifdef RECEIVE_ESPNOW
-            myDataToSend = myDataReceived;
-            esp_now_register_recv_cb(OnDataRecv);
+                myDataToSend = myDataReceived;
+                esp_now_register_recv_cb(OnDataRecv);
 #endif
-            scheduleUplink(fPort, payloadBuffer, payloadLength);
+
+                scheduleUplink(fPort, payloadBuffer, payloadLength);
+            }
         }
     }
 }
@@ -1153,15 +1182,15 @@ void setup()
     // Attempt to connect to Wifi network:
     serial.print("Connecting to ");
     Serial.println(ssid);
-
+    WiFi.onEvent(WiFiEvent);
     WiFi.begin(ssid, password);
 
-    uint8_t maxConnectionAttempts = 10;
+    uint8_t maxConnectionAttempts = 255;
     uint8_t attempts = 0;
 
     while (attempts <= maxConnectionAttempts && (WiFi.status() != WL_CONNECTED))
     {
-        delay(500);
+        delay(100);
         attempts++;
         serial.print(".");
     }
@@ -1172,9 +1201,35 @@ void setup()
         serial.println("WiFi connected");
         serial.println("IP address: ");
         serial.println(WiFi.localIP());
-        // init and get the time
-        const char *ntpServer = "pool.ntp.org";
-        configTime(3600 /*gmtOffset_sec*/, 3600 /*daylightOffset_sec*/, ntpServer);
+    // init and get the time
+    // const char *ntpServer = "pool.ntp.org";
+    // configTime(3600 /*gmtOffset_sec*/, 3600 /*daylightOffset_sec*/, ntpServer);
+    // ezt::setServer("pool.ntp.org"); // Set the NTP server address
+    ezt:
+        setDebug(INFO);
+        Serial.println("Trying to sync the time...");
+        boolean timeSynched = ezt::waitForSync(30);
+        if (timeSynched)
+        {
+            serial.println("Time synched: " + String(timeSynched));
+        }
+        else
+        {
+            serial.println("Time not synched: " + String(timeSynched));
+        }
+        Serial.println("Trying to set the location...");
+
+        boolean locationSet = Berlin.setLocation("Europe/Berlin"); // Set your location here
+
+        if (locationSet)
+        {
+            serial.println("Location set: " + Berlin.getTimezoneName());
+        }
+        else
+        {
+            serial.println("Location is not set: " + Berlin.getTimezoneName());
+        }
+
         printLocalTime();
     }
     else
