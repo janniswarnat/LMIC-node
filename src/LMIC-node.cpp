@@ -53,7 +53,9 @@
 #include "LMIC-node.h"
 #include <Adafruit_ADS1X15.h>
 #include <Wire.h>
+#if defined(SEND_ESPNOW) || defined(RECEIVE_ESPNOW)
 #include <esp_now.h>
+#endif
 #include <WiFi.h>
 
 //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▄ █▀▀ █▀▀ ▀█▀ █▀█
@@ -68,7 +70,6 @@ boolean sendOutMyDataToSend = false;
 typedef struct struct_message
 {
     u_int16_t litersInLastThreeMeasurementIntervals[3];
-    boolean sentFromCollectFlowEachSecond;
 } struct_message;
 
 struct_message myDataToSend = {0};
@@ -80,18 +81,21 @@ struct_message myDataToSend = {0};
 Adafruit_ADS1115 ads1;
 uint16_t static secondsInCurrentInterval = 0;
 float static litersInMeasurementInterval = 0;
-//float static maxFlow = 0;
-//float static maxLitersInMeasurementInterval = 0;
-//int16_t static maxDigitalValue2 = 0;
+// float static maxFlow = 0;
+// float static maxLitersInMeasurementInterval = 0;
+// int16_t static maxDigitalValue2 = 0;
 const uint16_t measurementInterval = 600;
 // Adjust according to your settings in the Keyence sensor menu
 const uint16_t maxTemperatureSetInKeyenceMenu = 100;
 const uint16_t maxFlowSetInKeyenceMenu = 30;
 // Adjust after using Keyence simulation (min / max values) to determine ADC values
-const uint16_t minADCValueTemperature = 6441; //FD-H20, FD-H32 was: 6471
-const uint16_t minADCValueFlow = 6242; //FD-H20, FD-H32 was: 6266
-const uint16_t maxADCValueTemperature = 32142; //FD-H20, FD-H32 was: 32157
-const uint16_t maxADCValueFlow = 31910; //FD-H20, FD-H32 was: 31944
+const uint16_t minADCValueTemperature = 6441;  // FD-H20, FD-H32 was: 6471
+const uint16_t minADCValueFlow = 6242;         // FD-H20, FD-H32 was: 6266
+const uint16_t maxADCValueTemperature = 32142; // FD-H20, FD-H32 was: 32157
+const uint16_t maxADCValueFlow = 31910;        // FD-H20, FD-H32 was: 31944
+#endif
+
+#ifdef SEND_ESPNOW
 // REPLACE WITH YOUR ESPNOW RECEIVER MAC Address
 const uint8_t broadcastAddress[] = {0xC8, 0xC9, 0xA3, 0xC8, 0xCD, 0xCC};
 esp_now_peer_info_t peerInfo;
@@ -100,7 +104,6 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
     Serial.print("\r\nLast Packet Send Status:\t");
     Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
-    myDataToSend.sentFromCollectFlowEachSecond = false;
 }
 #endif
 
@@ -109,7 +112,7 @@ const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASSWORD;
 #endif
 
-#ifndef USE_ADC
+#ifdef RECEIVE_ESPNOW
 uint8_t static secondsSinceLastESPNOWMessage = 255;
 boolean static firstESPMessageReceived = false;
 const uint8_t senderAddress[] = {0x98, 0xCD, 0xAC, 0xBF, 0x90, 0x98};
@@ -127,11 +130,6 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
         return;
     }
     memcpy(&myDataReceived, incomingData, sizeof(myDataReceived));
-
-    if(!myDataReceived.sentFromCollectFlowEachSecond){
-        Serial.println("Weird message, ignore message");
-        return;
-    }
 
     secondsSinceLastESPNOWMessage = 0;
     Serial.print("Bytes received: ");
@@ -788,16 +786,16 @@ void collectFlowEachSecond()
     // {
     //     maxDigitalValue2 = digitalValue2;
     // }
-    
+
     float temperature = (float)((digitalValue0 - minADCValueTemperature) * 100) / (float)(maxADCValueTemperature - minADCValueTemperature);
     float flow = (float)((digitalValue2 - minADCValueFlow) * 30) / (float)(maxADCValueFlow - minADCValueFlow);
 
-    flow = max(0, flow); //flow can be negative, especially when sensor is turned on
-    
+    flow = max(0, flow); // flow can be negative, especially when sensor is turned on
+
     // if(flow > maxFlow){
     //     maxFlow = flow;
     // }
-    
+
     Serial.print("Analog 0 Digital Value: ");
     Serial.print(digitalValue0);
     Serial.print(", Temperature: ");
@@ -823,12 +821,12 @@ void collectFlowEachSecond()
     Serial.println(litersInMeasurementInterval, 2);
     // Serial.print(", maxLitersInMeasurementInterval: ");
     // Serial.println(maxLitersInMeasurementInterval, 2);
-    
+
     // set values to send via ESPNOW
     myDataToSend.litersInLastThreeMeasurementIntervals[0] = (uint16_t)(roundf(litersInMeasurementInterval));
 
+#ifdef SEND_ESPNOW
     // Send message via ESP-NOW
-    myDataToSend.sentFromCollectFlowEachSecond = true;
     esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&myDataToSend, sizeof(myDataToSend));
 
     if (result == ESP_OK)
@@ -839,6 +837,7 @@ void collectFlowEachSecond()
     {
         serial.println("Error sending the data");
     }
+#endif
 }
 #endif
 
@@ -870,7 +869,7 @@ void processWork(ostime_t doWorkJobTimeStamp)
     collectFlowEachSecond();
 #endif
 
-#ifndef USE_ADC
+#ifdef RECEIVE_ESPNOW
     boolean receivingESPMessages = secondsSinceLastESPNOWMessage < 10;
 #endif
     // Skip processWork if using OTAA and still joining.
@@ -890,7 +889,7 @@ void processWork(ostime_t doWorkJobTimeStamp)
         // information better readable on the small display.
         display.clearLine(INTERVAL_ROW);
         display.setCursor(COL_0, INTERVAL_ROW);
-#ifndef USE_ADC
+#ifdef RECEIVE_ESPNOW
         display.print("");
         display.print(receivingESPMessages);
         display.print(" ");
@@ -946,7 +945,7 @@ void processWork(ostime_t doWorkJobTimeStamp)
             uint8_t fPort = 10;
             uint8_t statuses = 0;
 
-#ifndef USE_ADC
+#ifdef RECEIVE_ESPNOW
             if (receivingESPMessages)
             {
                 statuses |= 1 << 0;
@@ -971,7 +970,7 @@ void processWork(ostime_t doWorkJobTimeStamp)
             secondsInCurrentInterval = 0;
             litersInMeasurementInterval = 0;
 #endif
-#ifndef USE_ADC
+#ifdef RECEIVE_ESPNOW
             myDataToSend = myDataReceived;
             esp_now_register_recv_cb(OnDataRecv);
 #endif
@@ -1027,19 +1026,23 @@ void setup()
     printHeader();
 #endif
 
-    // Set device as a Wi-Fi Station
+// Set device as a Wi-Fi Station
+#if defined(USE_WIFI) || defined(SEND_ESPNOW) || defined(RECEIVE_ESPNOW)
     WiFi.mode(WIFI_STA);
+#endif
 
-    // Init ESP-NOW
+// Init ESP-NOW
+#if defined(SEND_ESPNOW) || defined(RECEIVE_ESPNOW)
     if (esp_now_init() != ESP_OK)
     {
         serial.println("Error initializing ESP-NOW");
         return;
     }
+#endif
 
 // Once ESPNow is successfully Init, we will register for Send CB to
 // get the status of Trasnmitted packet
-#ifdef USE_ADC
+#ifdef SEND_ESPNOW
     esp_now_register_send_cb(OnDataSent);
 
     // Register peer
@@ -1055,7 +1058,7 @@ void setup()
     }
 #endif
 
-#ifndef USE_ADC
+#ifdef RECEIVE_ESPNOW
     esp_now_register_recv_cb(OnDataRecv);
 #endif
 
