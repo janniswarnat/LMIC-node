@@ -83,6 +83,7 @@ enum class ActivationMode {OTAA, ABP};
 #include "../keyfiles/lorawan-keys.h"
 #ifdef USE_WIFI
     #include "../keyfiles/wifi-credentials.h"
+    #include "../keyfiles/bearer-token.h"
 #endif
 
     

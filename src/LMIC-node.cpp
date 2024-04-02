@@ -51,12 +51,19 @@
  ******************************************************************************/
 
 #include "LMIC-node.h"
+#ifdef USE_ADC
 #include <Adafruit_ADS1X15.h>
 #include <Wire.h>
+#endif
 #if defined(SEND_ESPNOW) || defined(RECEIVE_ESPNOW)
 #include <esp_now.h>
 #endif
+#ifdef USE_WIFI
 #include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <time.h>
+#endif
 
 //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▄ █▀▀ █▀▀ ▀█▀ █▀█
 //  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▄ █▀▀ █ █  █  █ █
@@ -110,6 +117,18 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 #ifdef USE_WIFI
 const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASSWORD;
+const char *bearerToken = BEARER_TOKEN;
+
+void printLocalTime()
+{
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo))
+    {
+        Serial.println("Failed to obtain time");
+        return;
+    }
+    Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+}
 #endif
 
 #ifdef RECEIVE_ESPNOW
@@ -871,59 +890,127 @@ void processWork(ostime_t doWorkJobTimeStamp)
 
 #ifdef RECEIVE_ESPNOW
     boolean receivingESPMessages = secondsSinceLastESPNOWMessage < 10;
+    display.print("");
+    display.print(receivingESPMessages);
+    display.print(" ");
+    display.print(myDataReceived.litersInLastThreeMeasurementIntervals[0]);
+    display.print(" ");
+    display.print(myDataReceived.litersInLastThreeMeasurementIntervals[1]);
+    display.print(" ");
+    display.print(myDataReceived.litersInLastThreeMeasurementIntervals[2]);
 #endif
-    // Skip processWork if using OTAA and still joining.
-    if (LMIC.devaddr != 0)
-    {
-        // Collect input data.
-        // For simplicity LMIC-node uses a counter to simulate a sensor.
-        // The counter is increased automatically by getCounterValue()
-        // and can be reset with a 'reset counter' command downlink message.
 
-        uint16_t counterValue = getCounterValue();
-        ostime_t timestamp = os_getTime();
+    // Collect input data.
+    // For simplicity LMIC-node uses a counter to simulate a sensor.
+    // The counter is increased automatically by getCounterValue()
+    // and can be reset with a 'reset counter' command downlink message.
+
+    uint16_t counterValue = getCounterValue();
+    ostime_t timestamp = os_getTime();
 
 #ifdef USE_DISPLAY
-        // Interval and Counter values are combined on a single row.
-        // This allows to keep the 3rd row empty which makes the
-        // information better readable on the small display.
-        display.clearLine(INTERVAL_ROW);
-        display.setCursor(COL_0, INTERVAL_ROW);
-#ifdef RECEIVE_ESPNOW
-        display.print("");
-        display.print(receivingESPMessages);
-        display.print(" ");
-        display.print(myDataReceived.litersInLastThreeMeasurementIntervals[0]);
-        display.print(" ");
-        display.print(myDataReceived.litersInLastThreeMeasurementIntervals[1]);
-        display.print(" ");
-        display.print(myDataReceived.litersInLastThreeMeasurementIntervals[2]);
+    // Interval and Counter values are combined on a single row.
+    // This allows to keep the 3rd row empty which makes the
+    // information better readable on the small display.
+    display.clearLine(INTERVAL_ROW);
+    display.setCursor(COL_0, INTERVAL_ROW);
 #endif
-#endif
+
 #ifdef USE_SERIAL
-        printEvent(timestamp, "Input data collected", PrintTarget::Serial);
-#ifdef USE_WIFI
-        if (WiFi.status() == WL_CONNECTED)
-        {
-            String status = "Connected to WiFi. IP address: " + WiFi.localIP().toString();
-            printEvent(timestamp, status.c_str(), PrintTarget::Serial);
-        }
-        else
-        {
-            printEvent(timestamp, "Not connected to WiFi", PrintTarget::Serial);
-        }
-#endif
-        printSpaces(serial, MESSAGE_INDENT);
-        serial.print(F("COUNTER value: "));
-        serial.println(counterValue);
+    printEvent(timestamp, "Input data collected", PrintTarget::Serial);
+    printSpaces(serial, MESSAGE_INDENT);
+    serial.print(F("COUNTER value: "));
+    serial.println(counterValue);
 #endif
 
 #ifdef USE_ADC
-        if (secondsInCurrentInterval >= measurementInterval)
-        {
-            sendOutMyDataToSend = true;
-        }
+    if (secondsInCurrentInterval >= measurementInterval)
+    {
+        sendOutMyDataToSend = true;
+    }
 #endif
+
+#ifdef USE_WIFI
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        String status = "Connected to WiFi. IP address: " + WiFi.localIP().toString() + ", MAC: " + WiFi.macAddress();
+#ifdef USE_SERIAL
+        printEvent(timestamp, status.c_str(), PrintTarget::Serial);
+#endif
+        HTTPClient http;
+
+        http.begin("https://data.digitalzentrum-lr.de/api/data/push"); // Specify destination for HTTP request
+        http.addHeader("Content-Type", "application/json");            // Specify content-type header
+        http.addHeader("Authorization", bearerToken);                  // Specify authorization header
+
+        // Create a JSON object
+        StaticJsonDocument<512> doc;
+
+        doc["id"] = "unique-id";
+        doc["source"] = "post-request-test";
+        doc["name"] = "Post Request Test";
+        doc["user"] = "admin_cw";
+
+        JsonObject meta = doc.createNestedObject("meta");
+
+        JsonArray valueTypes = doc.createNestedArray("valueTypes");
+        JsonObject valueType1 = valueTypes.createNestedObject();
+        valueType1["name"] = "Number Example";
+        valueType1["unit"] = "s";
+        valueType1["type"] = "Number";
+
+        JsonArray values = doc.createNestedArray("values");
+        JsonObject value1 = values.createNestedObject();
+
+        time_t now;
+        time(&now);
+
+        value1["date"] = now * 1000LL;
+        JsonArray value1_values = value1.createNestedArray("value");
+        value1_values.add(counterValue);
+
+        // Convert JSON object into a string
+        String jsonString;
+        serializeJson(doc, jsonString);
+
+        int httpResponseCode = http.POST(jsonString); // Send the actual POST request
+
+        if (httpResponseCode > 0)
+        {
+
+            unsigned long startTime = millis(); // Record the start time
+
+            String response = http.getString(); // Get the response to the request
+
+            unsigned long endTime = millis();             // Record the end time
+            unsigned long duration = endTime - startTime; // Calculate the duration
+
+            Serial.println(httpResponseCode); // Print return code
+            Serial.println(response);         // Print request answer
+            Serial.print(duration);
+            Serial.println(" ms"); // Print the duration
+        }
+        else
+        {
+
+            Serial.print("Error on sending POST: ");
+            Serial.println(httpResponseCode);
+        }
+
+        http.end(); // Free resources
+    }
+    else
+    {
+        String status = "Not connected to WiFi, MAC: " + WiFi.macAddress();
+#ifdef USE_SERIAL
+        printEvent(timestamp, status.c_str(), PrintTarget::Serial);
+#endif
+    }
+#endif
+
+    // Skip processWork if using OTAA and still joining.
+    if (LMIC.devaddr != 0)
+    {
 
         // For simplicity LMIC-node will try to send an uplink
         // message every time processWork() is executed.
@@ -1085,6 +1172,10 @@ void setup()
         serial.println("WiFi connected");
         serial.println("IP address: ");
         serial.println(WiFi.localIP());
+        // init and get the time
+        const char *ntpServer = "pool.ntp.org";
+        configTime(3600 /*gmtOffset_sec*/, 3600 /*daylightOffset_sec*/, ntpServer);
+        printLocalTime();
     }
     else
     {
