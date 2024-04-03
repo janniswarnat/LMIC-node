@@ -58,8 +58,10 @@
 #if defined(SEND_ESPNOW) || defined(RECEIVE_ESPNOW)
 #include <esp_now.h>
 #endif
-#ifdef USE_WIFI
+#if defined(SEND_ESPNOW) || defined(RECEIVE_ESPNOW) || defined(USE_WIFI)
 #include <WiFi.h>
+#endif
+#ifdef USE_WIFI
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <ezTime.h>
