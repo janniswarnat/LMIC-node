@@ -86,7 +86,8 @@ struct_message myDataToSend = {0};
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
-uint16_t static startOfCurrentInterval = millis() / 1000;
+unsigned long static intervalStartMillis = millis();
+unsigned long static currentMillis = millis();
 const uint16_t measurementInterval = 600;
 
 #ifdef USE_ADC
@@ -251,6 +252,7 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
 
     if ((myDataReceived.litersInLastThreeMeasurementIntervals[0] < myDataToSend.litersInLastThreeMeasurementIntervals[0]) || (myDataReceived.litersInLastThreeMeasurementIntervals[1] != myDataToSend.litersInLastThreeMeasurementIntervals[1]) || (myDataReceived.litersInLastThreeMeasurementIntervals[2] != myDataToSend.litersInLastThreeMeasurementIntervals[2]))
     {
+        Serial.println("sendOutMyDataToSend = true from RECEIVE_ESPNOW because sender started new interval");
         sendOutMyDataToSend = true;
         esp_now_unregister_recv_cb();
     }
@@ -915,10 +917,7 @@ void collectFlowEachSecond()
 
     litersInMeasurementInterval += roundf(flow * 10) / 10 / 60; // l/s
 
-    Serial.print("Seconds since start of current measurement interval: ");
-    unsigned long secondsSinceStart = millis() / 1000;
-    Serial.print(secondsSinceStart - startOfCurrentInterval);
-    Serial.print(", litersInMeasurementInterval: ");
+    Serial.print("litersInMeasurementInterval: ");
     Serial.println(litersInMeasurementInterval, 2);
     // Serial.print(", maxLitersInMeasurementInterval: ");
     // Serial.println(maxLitersInMeasurementInterval, 2);
@@ -966,6 +965,13 @@ void processWork(ostime_t doWorkJobTimeStamp)
     // reading sensor and GPS data and schedule uplink
     // messages if anything needs to be transmitted.
 
+    currentMillis = millis();
+    u_int16_t secondsPassedInInterval = (currentMillis - intervalStartMillis) / 1000;
+    Serial.print("Start processWork, seconds since start of current measurement interval: ");
+    Serial.print(secondsPassedInInterval);
+    Serial.print(", sendOutMyDataToSend: ");
+    Serial.println(sendOutMyDataToSend);
+
 #ifdef USE_ADC
     collectFlowEachSecond();
 #endif
@@ -1006,9 +1012,14 @@ void processWork(ostime_t doWorkJobTimeStamp)
 #endif
 
 #if defined(USE_ADC) || defined(USE_WIFI)
-    unsigned long secondsSinceStart = millis() / 1000;
-    if ((secondsSinceStart - startOfCurrentInterval) >= measurementInterval)
+
+    if (secondsPassedInInterval >= measurementInterval)
     {
+        Serial.println("sendOutMyDataToSend = true from USE_ADC, USE_WIFI since interval ended");
+        Serial.print("secondsSinceStart: ");
+        Serial.print(secondsPassedInInterval);
+        Serial.print(", measurementInterval: ");
+        Serial.println(measurementInterval);
         sendOutMyDataToSend = true;
     }
 #endif
@@ -1034,7 +1045,9 @@ void processWork(ostime_t doWorkJobTimeStamp)
     if (sendOutMyDataToSend)
     {
         sendOutMyDataToSend = false;
-        startOfCurrentInterval = millis() / 1000;
+        intervalStartMillis = millis();
+        Serial.print("sendOutMyDataToSend was true; reset to false, resetting intervalStartMillis: ");
+        Serial.println(intervalStartMillis);
 #ifdef USE_WIFI
         sendOutViaHttp(myDataToSend.litersInLastThreeMeasurementIntervals[0]);
 #endif
@@ -1071,6 +1084,13 @@ void processWork(ostime_t doWorkJobTimeStamp)
                 }
 #endif
 
+#ifdef USE_ADS // only temporary for debugging
+                if (sendOutMyDataToSend)
+                {
+                    statuses |= 1 << 0;
+                }
+#endif
+
                 payloadBuffer[0] = (myDataToSend.litersInLastThreeMeasurementIntervals[0]) >> 8;
                 payloadBuffer[1] = (myDataToSend.litersInLastThreeMeasurementIntervals[0]) & 0xFF;
                 payloadBuffer[2] = (myDataToSend.litersInLastThreeMeasurementIntervals[1]) >> 8;
@@ -1091,6 +1111,8 @@ void processWork(ostime_t doWorkJobTimeStamp)
                 esp_now_register_recv_cb(OnDataRecv);
 #endif
 
+                Serial.print("Scheduling uplink, sendOutDataToSend must now be false, sendOutMyDataToSend: ");
+                Serial.println(sendOutMyDataToSend);
                 scheduleUplink(fPort, payloadBuffer, payloadLength);
             }
         }
