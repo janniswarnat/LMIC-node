@@ -978,16 +978,6 @@ void processWork(ostime_t doWorkJobTimeStamp)
 
 #ifdef RECEIVE_ESPNOW
     boolean receivingESPMessages = workDoneSinceLastESPNOWMessage < 10;
-#ifdef USE_DISPLAY
-    display.print("");
-    display.print(receivingESPMessages);
-    display.print(" ");
-    display.print(myDataReceived.litersInLastThreeMeasurementIntervals[0]);
-    display.print(" ");
-    display.print(myDataReceived.litersInLastThreeMeasurementIntervals[1]);
-    display.print(" ");
-    display.print(myDataReceived.litersInLastThreeMeasurementIntervals[2]);
-#endif
 #endif
 
     // Collect input data.
@@ -1004,6 +994,15 @@ void processWork(ostime_t doWorkJobTimeStamp)
     // information better readable on the small display.
     display.clearLine(INTERVAL_ROW);
     display.setCursor(COL_0, INTERVAL_ROW);
+#ifdef RECEIVE_ESPNOW
+    display.print(receivingESPMessages);
+    display.print(" ");
+#endif
+    display.print(myDataReceived.litersInLastThreeMeasurementIntervals[0]);
+    display.print(" ");
+    display.print(myDataReceived.litersInLastThreeMeasurementIntervals[1]);
+    display.print(" ");
+    display.print(myDataReceived.litersInLastThreeMeasurementIntervals[2]);
 #endif
 
 #ifdef USE_SERIAL
