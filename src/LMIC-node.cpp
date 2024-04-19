@@ -71,17 +71,20 @@
 //  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▄ █▀▀ █ █  █  █ █
 //  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀   ▀▀▀ ▀▀▀ ▀▀  ▀▀▀   ▀▀  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀
 
-const uint8_t payloadBufferLength = 7; // Adjust to fit max payload length
-boolean sendOutMyDataToSend = false;
+const uint8_t payloadBufferLength = 9; // Adjust to fit max payload length
+boolean sendOutData = false;
 
 // Structure example to send data
 // Must match the receiver structure
 typedef struct struct_message
 {
     u_int16_t litersInLastThreeMeasurementIntervals[3];
+    u_int8_t intervalIds[3];
 } struct_message;
 
-struct_message myDataToSend = {0};
+struct_message dataToSend = {0};
+uint8_t intervalId = random(256);
+
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
@@ -93,9 +96,6 @@ const uint16_t measurementInterval = 600;
 #ifdef USE_ADC
 Adafruit_ADS1115 ads1;
 float static litersInMeasurementInterval = 0;
-// float static maxFlow = 0;
-// float static maxLitersInMeasurementInterval = 0;
-// int16_t static maxDigitalValue2 = 0;
 // Adjust according to your settings in the Keyence sensor menu
 const uint16_t maxTemperatureSetInKeyenceMenu = 100;
 const uint16_t maxFlowSetInKeyenceMenu = 30;
@@ -212,13 +212,13 @@ void sendOutViaHttp(uint16_t value)
     http.end(); // Free resources
 }
 
-#endif
+#endif 
 
 #ifdef RECEIVE_ESPNOW
 uint8_t static workDoneSinceLastESPNOWMessage = 255;
 boolean static firstESPMessageReceived = false;
 const uint8_t senderAddress[] = {0x98, 0xCD, 0xAC, 0xBF, 0x90, 0x98};
-struct_message myDataReceived = {0};
+struct_message dataReceived = {0};
 
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
 {
@@ -231,34 +231,40 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
         Serial.println("Sender is unknown, ignore message");
         return;
     }
-    memcpy(&myDataReceived, incomingData, sizeof(myDataReceived));
+    memcpy(&dataReceived, incomingData, sizeof(dataReceived));
 
     workDoneSinceLastESPNOWMessage = 0;
     Serial.print("Bytes received: ");
     Serial.println(len);
-    Serial.print("myDataReceived: ");
-    Serial.print(myDataReceived.litersInLastThreeMeasurementIntervals[0]);
+    Serial.print("dataReceived: ");
+    Serial.print(dataReceived.litersInLastThreeMeasurementIntervals[0]);
     Serial.print(", ");
-    Serial.print(myDataReceived.litersInLastThreeMeasurementIntervals[1]);
+    Serial.print(dataReceived.litersInLastThreeMeasurementIntervals[1]);
     Serial.print(", ");
-    Serial.println(myDataReceived.litersInLastThreeMeasurementIntervals[2]);
+    Serial.println(dataReceived.litersInLastThreeMeasurementIntervals[2]);
+    Serial.print("intervalIds: ");
+    Serial.print(dataReceived.intervalIds[0]);
+    Serial.print(", ");
+    Serial.print(dataReceived.intervalIds[1]);
+    Serial.print(", ");
+    Serial.println(dataReceived.intervalIds[2]);
 
     if (!firstESPMessageReceived)
     {
         firstESPMessageReceived = true;
-        myDataToSend = myDataReceived;
+        dataToSend = dataReceived;
         return;
     }
 
-    if ((myDataReceived.litersInLastThreeMeasurementIntervals[0] < myDataToSend.litersInLastThreeMeasurementIntervals[0]) || (myDataReceived.litersInLastThreeMeasurementIntervals[1] != myDataToSend.litersInLastThreeMeasurementIntervals[1]) || (myDataReceived.litersInLastThreeMeasurementIntervals[2] != myDataToSend.litersInLastThreeMeasurementIntervals[2]))
+    if ((dataReceived.litersInLastThreeMeasurementIntervals[0] < dataToSend.litersInLastThreeMeasurementIntervals[0]) || (dataReceived.litersInLastThreeMeasurementIntervals[1] != dataToSend.litersInLastThreeMeasurementIntervals[1]) || (dataReceived.litersInLastThreeMeasurementIntervals[2] != dataToSend.litersInLastThreeMeasurementIntervals[2]))
     {
-        Serial.println("sendOutMyDataToSend = true from RECEIVE_ESPNOW because sender started new interval");
-        sendOutMyDataToSend = true;
+        Serial.println("sendOutData = true from RECEIVE_ESPNOW because sender started new interval");
+        sendOutData = true;
         esp_now_unregister_recv_cb();
     }
     else
     {
-        myDataToSend = myDataReceived;
+        dataToSend = dataReceived;
     }
 }
 #endif
@@ -885,19 +891,11 @@ void collectFlowEachSecond()
 {
     int16_t digitalValue0 = min(ads1.readADC_SingleEnded(0), maxADCValueTemperature);
     int16_t digitalValue2 = min(ads1.readADC_SingleEnded(2), maxADCValueFlow);
-    // if (digitalValue2 > maxDigitalValue2)
-    // {
-    //     maxDigitalValue2 = digitalValue2;
-    // }
 
     float temperature = (float)((digitalValue0 - minADCValueTemperature) * 100) / (float)(maxADCValueTemperature - minADCValueTemperature);
     float flow = (float)((digitalValue2 - minADCValueFlow) * 30) / (float)(maxADCValueFlow - minADCValueFlow);
 
     flow = max(0, flow); // flow can be negative, especially when sensor is turned on
-
-    // if(flow > maxFlow){
-    //     maxFlow = flow;
-    // }
 
     Serial.print("Analog 0 Digital Value: ");
     Serial.print(digitalValue0);
@@ -907,27 +905,34 @@ void collectFlowEachSecond()
 
     Serial.print("Analog 2 Digital Value: ");
     Serial.print(digitalValue2);
-    // Serial.print(", Max Digital Value: ");
-    // Serial.print(maxDigitalValue2);
     Serial.print(", Flow: ");
     Serial.print(flow, 0);
-    // Serial.println(", maxFlow: ");
-    // Serial.println(maxFlow, 0);
     Serial.println(" l/min");
 
     litersInMeasurementInterval += roundf(flow * 10) / 10 / 60; // l/s
 
     Serial.print("litersInMeasurementInterval: ");
     Serial.println(litersInMeasurementInterval, 2);
-    // Serial.print(", maxLitersInMeasurementInterval: ");
-    // Serial.println(maxLitersInMeasurementInterval, 2);
 
     // set values to send via ESPNOW
-    myDataToSend.litersInLastThreeMeasurementIntervals[0] = (uint16_t)(roundf(litersInMeasurementInterval));
+    dataToSend.litersInLastThreeMeasurementIntervals[0] = (uint16_t)(roundf(litersInMeasurementInterval));
+
+    Serial.print("dataToSend: ");
+    Serial.print(dataToSend.litersInLastThreeMeasurementIntervals[0]);
+    Serial.print(", ");
+    Serial.print(dataToSend.litersInLastThreeMeasurementIntervals[1]);
+    Serial.print(", ");
+    Serial.println(dataToSend.litersInLastThreeMeasurementIntervals[2]);
+    Serial.print("intervalIds: ");
+    Serial.print(dataToSend.intervalIds[0]);
+    Serial.print(", ");
+    Serial.print(dataToSend.intervalIds[1]);
+    Serial.print(", ");
+    Serial.println(dataToSend.intervalIds[2]);
 
 #ifdef SEND_ESPNOW
     // Send message via ESP-NOW
-    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&myDataToSend, sizeof(myDataToSend));
+    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&dataToSend, sizeof(dataToSend));
 
     if (result == ESP_OK)
     {
@@ -969,8 +974,8 @@ void processWork(ostime_t doWorkJobTimeStamp)
     u_int16_t secondsPassedInInterval = (currentMillis - intervalStartMillis) / 1000;
     Serial.print("Start processWork, seconds since start of current measurement interval: ");
     Serial.print(secondsPassedInInterval);
-    Serial.print(", sendOutMyDataToSend: ");
-    Serial.println(sendOutMyDataToSend);
+    Serial.print(", sendOutData: ");
+    Serial.println(sendOutData);
 
 #ifdef USE_ADC
     collectFlowEachSecond();
@@ -998,11 +1003,11 @@ void processWork(ostime_t doWorkJobTimeStamp)
     display.print(receivingESPMessages);
     display.print(" ");
 #endif
-    display.print(myDataReceived.litersInLastThreeMeasurementIntervals[0]);
+    display.print(dataReceived.litersInLastThreeMeasurementIntervals[0]);
     display.print(" ");
-    display.print(myDataReceived.litersInLastThreeMeasurementIntervals[1]);
+    display.print(dataReceived.litersInLastThreeMeasurementIntervals[1]);
     display.print(" ");
-    display.print(myDataReceived.litersInLastThreeMeasurementIntervals[2]);
+    display.print(dataReceived.litersInLastThreeMeasurementIntervals[2]);
 #endif
 
 #ifdef USE_SERIAL
@@ -1016,12 +1021,12 @@ void processWork(ostime_t doWorkJobTimeStamp)
 
     if (secondsPassedInInterval >= measurementInterval)
     {
-        Serial.println("sendOutMyDataToSend = true from USE_ADC, USE_WIFI since interval ended");
+        Serial.println("sendOutData = true from USE_ADC, USE_WIFI since interval ended");
         Serial.print("secondsSinceStart: ");
         Serial.print(secondsPassedInInterval);
         Serial.print(", measurementInterval: ");
         Serial.println(measurementInterval);
-        sendOutMyDataToSend = true;
+        sendOutData = true;
     }
 #endif
 
@@ -1043,14 +1048,14 @@ void processWork(ostime_t doWorkJobTimeStamp)
     }
 #endif
 
-    if (sendOutMyDataToSend)
+    if (sendOutData)
     {
-        sendOutMyDataToSend = false;
+        sendOutData = false;
         intervalStartMillis = millis();
-        Serial.print("sendOutMyDataToSend was true; reset to false, resetting intervalStartMillis: ");
+        Serial.print("sendOutData was true; reset to false, resetting intervalStartMillis: ");
         Serial.println(intervalStartMillis);
 #ifdef USE_WIFI
-        sendOutViaHttp(myDataToSend.litersInLastThreeMeasurementIntervals[0]);
+        sendOutViaHttp(dataToSend.litersInLastThreeMeasurementIntervals[0]);
 #endif
 
         // Skip processWork if using OTAA and still joining.
@@ -1076,44 +1081,43 @@ void processWork(ostime_t doWorkJobTimeStamp)
             {
                 // Prepare uplink payload.
                 uint8_t fPort = 10;
-                uint8_t statuses = 0;
+                //uint8_t statuses = 0;
 
-#ifdef RECEIVE_ESPNOW
-                if (receivingESPMessages)
-                {
-                    statuses |= 1 << 0;
-                }
-#endif
+// #ifdef RECEIVE_ESPNOW
+//                 if (receivingESPMessages)
+//                 {
+//                     statuses |= 1 << 0;
+//                 }
+// #endif
 
-#ifdef USE_ADS // only temporary for debugging
-                if (sendOutMyDataToSend)
-                {
-                    statuses |= 1 << 0;
-                }
-#endif
-
-                payloadBuffer[0] = (myDataToSend.litersInLastThreeMeasurementIntervals[0]) >> 8;
-                payloadBuffer[1] = (myDataToSend.litersInLastThreeMeasurementIntervals[0]) & 0xFF;
-                payloadBuffer[2] = (myDataToSend.litersInLastThreeMeasurementIntervals[1]) >> 8;
-                payloadBuffer[3] = (myDataToSend.litersInLastThreeMeasurementIntervals[1]) & 0xFF;
-                payloadBuffer[4] = (myDataToSend.litersInLastThreeMeasurementIntervals[2]) >> 8;
-                payloadBuffer[5] = (myDataToSend.litersInLastThreeMeasurementIntervals[2]) & 0xFF;
-                payloadBuffer[6] = statuses;
-                uint8_t payloadLength = 7;
+                payloadBuffer[0] = (dataToSend.litersInLastThreeMeasurementIntervals[0]) >> 8;
+                payloadBuffer[1] = (dataToSend.litersInLastThreeMeasurementIntervals[0]) & 0xFF;
+                payloadBuffer[2] = (dataToSend.litersInLastThreeMeasurementIntervals[1]) >> 8;
+                payloadBuffer[3] = (dataToSend.litersInLastThreeMeasurementIntervals[1]) & 0xFF;
+                payloadBuffer[4] = (dataToSend.litersInLastThreeMeasurementIntervals[2]) >> 8;
+                payloadBuffer[5] = (dataToSend.litersInLastThreeMeasurementIntervals[2]) & 0xFF;
+                payloadBuffer[6] = dataToSend.intervalIds[0];
+                payloadBuffer[7] = dataToSend.intervalIds[1];
+                payloadBuffer[8] = dataToSend.intervalIds[2];
+                //payloadBuffer[6] = statuses;
+                uint8_t payloadLength = 9;
 
 #ifdef USE_ADC
-                myDataToSend.litersInLastThreeMeasurementIntervals[2] = myDataToSend.litersInLastThreeMeasurementIntervals[1];
-                myDataToSend.litersInLastThreeMeasurementIntervals[1] = myDataToSend.litersInLastThreeMeasurementIntervals[0];
-                myDataToSend.litersInLastThreeMeasurementIntervals[0] = 0;
+                dataToSend.litersInLastThreeMeasurementIntervals[2] = dataToSend.litersInLastThreeMeasurementIntervals[1];
+                dataToSend.litersInLastThreeMeasurementIntervals[1] = dataToSend.litersInLastThreeMeasurementIntervals[0];
+                dataToSend.litersInLastThreeMeasurementIntervals[0] = 0;
+                dataToSend.intervalIds[2] = dataToSend.intervalIds[1];
+                dataToSend.intervalIds[1] = dataToSend.intervalIds[0];
+                dataToSend.intervalIds[0] = ++intervalId;
                 litersInMeasurementInterval = 0;
 #endif
 #ifdef RECEIVE_ESPNOW
-                myDataToSend = myDataReceived;
+                dataToSend = dataReceived;
                 esp_now_register_recv_cb(OnDataRecv);
 #endif
 
-                Serial.print("Scheduling uplink, sendOutDataToSend must now be false, sendOutMyDataToSend: ");
-                Serial.println(sendOutMyDataToSend);
+                Serial.print("Scheduling uplink, sendOutData must now be false, sendOutData: ");
+                Serial.println(sendOutData);
                 scheduleUplink(fPort, payloadBuffer, payloadLength);
             }
         }
@@ -1293,6 +1297,10 @@ void setup()
 #endif
 
     resetCounter();
+
+    dataToSend.intervalIds[0] = intervalId;
+    dataToSend.intervalIds[1] = (intervalId-1);
+    dataToSend.intervalIds[2] = (intervalId-2);
 
     //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▀ █▀█ █▀▄
     //  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▀ █ █ █ █
