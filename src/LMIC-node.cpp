@@ -170,14 +170,15 @@ void sendOutViaHttp(uint16_t value)
 
     JsonArray valueTypes = jsonPayload.createNestedArray("valueTypes");
     JsonObject valueType1 = valueTypes.createNestedObject();
-    valueType1["name"] = "Number Example";
+    valueType1["name"] = "liters";
     // valueType1["unit"] = "s";
     valueType1["type"] = "Number";
 
     JsonArray values = jsonPayload.createNestedArray("values");
     JsonObject value1 = values.createNestedObject();
 
-    unsigned long now = Berlin.now();
+    //unsigned long now = Berlin.now();
+    unsigned long now = UTC.now();
 
     value1["date"] = now * 1000LL;
     JsonArray value1_values = value1.createNestedArray("value");
