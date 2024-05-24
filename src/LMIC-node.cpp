@@ -1056,9 +1056,7 @@ void processWork(ostime_t doWorkJobTimeStamp)
         Serial.println(wifiSendOutInterval);
         sendOutDataViaWifi = true;
     }
-#endif
 
-#ifdef USE_WIFI
     if (WiFi.status() == WL_CONNECTED)
     {
         String status = "Connected to WiFi. IP address: " + WiFi.localIP().toString() + ", MAC: " + WiFi.macAddress();
@@ -1074,9 +1072,7 @@ void processWork(ostime_t doWorkJobTimeStamp)
         printEvent(timestamp, status.c_str(), PrintTarget::Serial);
 #endif
     }
-#endif
 
-#ifdef USE_WIFI
     if (sendOutDataViaWifi)
     {
         sendOutDataViaWifi = false;
@@ -1085,241 +1081,242 @@ void processWork(ostime_t doWorkJobTimeStamp)
         Serial.println(wifiIntervalStartMillis);
         sendOutViaHttp((uint16_t)(roundf(litersInWifiSendOutInterval)));
         litersInWifiSendOutInterval = 0;
+    }
 #endif
 
-        if (sendOutDataViaLora)
+    if (sendOutDataViaLora)
+    {
+        sendOutDataViaLora = false;
+        loraIntervalStartMillis = millis();
+        Serial.print("sendOutDataViaLora was true; reset to false, resetting loraIntervalStartMillis: ");
+        Serial.println(loraIntervalStartMillis);
+
+        // Skip processWork if using OTAA and still joining.
+        if (LMIC.devaddr != 0)
         {
-            sendOutDataViaLora = false;
-            loraIntervalStartMillis = millis();
-            Serial.print("sendOutDataViaLora was true; reset to false, resetting loraIntervalStartMillis: ");
-            Serial.println(loraIntervalStartMillis);
 
-            // Skip processWork if using OTAA and still joining.
-            if (LMIC.devaddr != 0)
+            // For simplicity LMIC-node will try to send an uplink
+            // message every time processWork() is executed.
+
+            // Schedule uplink message if possible
+
+            if (LMIC.opmode & OP_TXRXPEND)
             {
-
-                // For simplicity LMIC-node will try to send an uplink
-                // message every time processWork() is executed.
-
-                // Schedule uplink message if possible
-
-                if (LMIC.opmode & OP_TXRXPEND)
-                {
 // TxRx is currently pending, do not send.
 #ifdef USE_SERIAL
-                    printEvent(timestamp, "Uplink not scheduled because TxRx pending", PrintTarget::Serial);
+                printEvent(timestamp, "Uplink not scheduled because TxRx pending", PrintTarget::Serial);
 #endif
 #ifdef USE_DISPLAY
-                    printEvent(timestamp, "UL not scheduled", PrintTarget::Display);
+                printEvent(timestamp, "UL not scheduled", PrintTarget::Display);
 #endif
-                }
-                else
-                {
-                    // Prepare uplink payload.
-                    uint8_t fPort = 10;
-                    // uint8_t statuses = 0;
+            }
+            else
+            {
+                // Prepare uplink payload.
+                uint8_t fPort = 10;
+                // uint8_t statuses = 0;
 
-                    // #ifdef RECEIVE_ESPNOW
-                    //                 if (receivingESPMessages)
-                    //                 {
-                    //                     statuses |= 1 << 0;
-                    //                 }
-                    // #endif
+                // #ifdef RECEIVE_ESPNOW
+                //                 if (receivingESPMessages)
+                //                 {
+                //                     statuses |= 1 << 0;
+                //                 }
+                // #endif
 
-                    payloadBuffer[0] = (dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[0]) >> 8;
-                    payloadBuffer[1] = (dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[0]) & 0xFF;
-                    payloadBuffer[2] = (dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[1]) >> 8;
-                    payloadBuffer[3] = (dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[1]) & 0xFF;
-                    payloadBuffer[4] = (dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[2]) >> 8;
-                    payloadBuffer[5] = (dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[2]) & 0xFF;
-                    payloadBuffer[6] = dataToSendViaLora.intervalIds[0];
-                    payloadBuffer[7] = dataToSendViaLora.intervalIds[1];
-                    payloadBuffer[8] = dataToSendViaLora.intervalIds[2];
-                    // payloadBuffer[6] = statuses;
-                    uint8_t payloadLength = 9;
+                payloadBuffer[0] = (dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[0]) >> 8;
+                payloadBuffer[1] = (dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[0]) & 0xFF;
+                payloadBuffer[2] = (dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[1]) >> 8;
+                payloadBuffer[3] = (dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[1]) & 0xFF;
+                payloadBuffer[4] = (dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[2]) >> 8;
+                payloadBuffer[5] = (dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[2]) & 0xFF;
+                payloadBuffer[6] = dataToSendViaLora.intervalIds[0];
+                payloadBuffer[7] = dataToSendViaLora.intervalIds[1];
+                payloadBuffer[8] = dataToSendViaLora.intervalIds[2];
+                // payloadBuffer[6] = statuses;
+                uint8_t payloadLength = 9;
 
 #ifdef USE_ADC
-                    dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[2] = dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[1];
-                    dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[1] = dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[0];
-                    dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[0] = 0;
-                    dataToSendViaLora.intervalIds[2] = dataToSendViaLora.intervalIds[1];
-                    dataToSendViaLora.intervalIds[1] = dataToSendViaLora.intervalIds[0];
-                    dataToSendViaLora.intervalIds[0] = ++intervalId;
-                    litersInLoraSendOutInterval = 0;
+                dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[2] = dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[1];
+                dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[1] = dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[0];
+                dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[0] = 0;
+                dataToSendViaLora.intervalIds[2] = dataToSendViaLora.intervalIds[1];
+                dataToSendViaLora.intervalIds[1] = dataToSendViaLora.intervalIds[0];
+                dataToSendViaLora.intervalIds[0] = ++intervalId;
+                litersInLoraSendOutInterval = 0;
 #endif
 #ifdef RECEIVE_ESPNOW
-                    dataToSendViaLora = dataReceived;
-                    esp_now_register_recv_cb(OnDataRecv);
+                dataToSendViaLora = dataReceived;
+                esp_now_register_recv_cb(OnDataRecv);
 #endif
 
-                    Serial.print("Scheduling uplink, sendOutDataViaLora must now be false, sendOutDataViaLora: ");
-                    Serial.println(sendOutDataViaLora);
-                    scheduleUplink(fPort, payloadBuffer, payloadLength);
-                }
+                Serial.print("Scheduling uplink, sendOutDataViaLora must now be false, sendOutDataViaLora: ");
+                Serial.println(sendOutDataViaLora);
+                scheduleUplink(fPort, payloadBuffer, payloadLength);
             }
         }
     }
+}
 
-    void processDownlink(ostime_t txCompleteTimestamp, uint8_t fPort, uint8_t * data, uint8_t dataLength)
+void processDownlink(ostime_t txCompleteTimestamp, uint8_t fPort, uint8_t *data, uint8_t dataLength)
+{
+    // This function is called from the onEvent() event handler
+    // on EV_TXCOMPLETE when a downlink message was received.
+
+    // Implements a 'reset counter' command that can be sent via a downlink message.
+    // To send the reset counter command to the node, send a downlink message
+    // (e.g. from the TTN Console) with single byte value resetCmd on port cmdPort.
+
+    const uint8_t cmdPort = 100;
+    const uint8_t resetCmd = 0xC0;
+
+    if (fPort == cmdPort && dataLength == 1 && data[0] == resetCmd)
     {
-        // This function is called from the onEvent() event handler
-        // on EV_TXCOMPLETE when a downlink message was received.
-
-        // Implements a 'reset counter' command that can be sent via a downlink message.
-        // To send the reset counter command to the node, send a downlink message
-        // (e.g. from the TTN Console) with single byte value resetCmd on port cmdPort.
-
-        const uint8_t cmdPort = 100;
-        const uint8_t resetCmd = 0xC0;
-
-        if (fPort == cmdPort && dataLength == 1 && data[0] == resetCmd)
-        {
 #ifdef USE_SERIAL
-            printSpaces(serial, MESSAGE_INDENT);
-            serial.println(F("Reset cmd received"));
+        printSpaces(serial, MESSAGE_INDENT);
+        serial.println(F("Reset cmd received"));
 #endif
-            ostime_t timestamp = os_getTime();
-            resetCounter();
-            printEvent(timestamp, "Counter reset", PrintTarget::All, false);
-        }
+        ostime_t timestamp = os_getTime();
+        resetCounter();
+        printEvent(timestamp, "Counter reset", PrintTarget::All, false);
     }
+}
 
-    //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▀ █▀█ █▀▄
-    //  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▀ █ █ █ █
-    //  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀   ▀▀▀ ▀▀▀ ▀▀  ▀▀▀   ▀▀▀ ▀ ▀ ▀▀
+//  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▀ █▀█ █▀▄
+//  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▀ █ █ █ █
+//  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀   ▀▀▀ ▀▀▀ ▀▀  ▀▀▀   ▀▀▀ ▀ ▀ ▀▀
 
-    void setup()
-    {
-        // boardInit(InitType::Hardware) must be called at start of setup() before anything else.
-        bool hardwareInitSucceeded = boardInit(InitType::Hardware);
+void setup()
+{
+    // boardInit(InitType::Hardware) must be called at start of setup() before anything else.
+    bool hardwareInitSucceeded = boardInit(InitType::Hardware);
 
 #ifdef USE_DISPLAY
-        initDisplay();
+    initDisplay();
 #endif
 
 #ifdef USE_SERIAL
-        initSerial(MONITOR_SPEED, WAITFOR_SERIAL_S);
+    initSerial(MONITOR_SPEED, WAITFOR_SERIAL_S);
 #endif
 
-        boardInit(InitType::PostInitSerial);
+    boardInit(InitType::PostInitSerial);
 
 #if defined(USE_SERIAL) || defined(USE_DISPLAY)
-        printHeader();
+    printHeader();
 #endif
 
 // Set device as a Wi-Fi Station
 #if defined(USE_WIFI) || defined(SEND_ESPNOW) || defined(RECEIVE_ESPNOW)
-        WiFi.mode(WIFI_STA);
+    WiFi.mode(WIFI_STA);
 #endif
 
 // Init ESP-NOW
 #if defined(SEND_ESPNOW) || defined(RECEIVE_ESPNOW)
-        if (esp_now_init() != ESP_OK)
-        {
-            serial.println("Error initializing ESP-NOW");
-            return;
-        }
+    if (esp_now_init() != ESP_OK)
+    {
+        serial.println("Error initializing ESP-NOW");
+        return;
+    }
 #endif
 
 // Once ESPNow is successfully Init, we will register for Send CB to
 // get the status of Trasnmitted packet
 #ifdef SEND_ESPNOW
-        esp_now_register_send_cb(OnDataSent);
+    esp_now_register_send_cb(OnDataSent);
 
-        // Register peer
-        memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-        peerInfo.channel = 0;
-        peerInfo.encrypt = false;
+    // Register peer
+    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
 
-        // Add peer
-        if (esp_now_add_peer(&peerInfo) != ESP_OK)
-        {
-            serial.println("Failed to add peer");
-            return;
-        }
+    // Add peer
+    if (esp_now_add_peer(&peerInfo) != ESP_OK)
+    {
+        serial.println("Failed to add peer");
+        return;
+    }
 #endif
 
 #ifdef RECEIVE_ESPNOW
-        esp_now_register_recv_cb(OnDataRecv);
+    esp_now_register_recv_cb(OnDataRecv);
 #endif
 
 #ifdef USE_WIFI
-        // Attempt to connect to Wifi network:
-        serial.print("Connecting to ");
-        Serial.println(ssid);
-        WiFi.onEvent(WiFiEvent);
-        WiFi.begin(ssid, password);
+    // Attempt to connect to Wifi network:
+    serial.print("Connecting to ");
+    Serial.println(ssid);
+    WiFi.onEvent(WiFiEvent);
+    WiFi.begin(ssid, password);
 
-        uint8_t maxConnectionAttempts = 255;
-        uint8_t attempts = 0;
+    uint8_t maxConnectionAttempts = 255;
+    uint8_t attempts = 0;
 
-        while (attempts <= maxConnectionAttempts && (WiFi.status() != WL_CONNECTED))
+    while (attempts <= maxConnectionAttempts && (WiFi.status() != WL_CONNECTED))
+    {
+        delay(100);
+        attempts++;
+        serial.print(".");
+    }
+
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        serial.println("");
+        serial.println("WiFi connected");
+        serial.println("IP address: ");
+        serial.println(WiFi.localIP());
+    // init and get the time
+    // const char *ntpServer = "pool.ntp.org";
+    // configTime(3600 /*gmtOffset_sec*/, 3600 /*daylightOffset_sec*/, ntpServer);
+    // ezt::setServer("pool.ntp.org"); // Set the NTP server address
+    ezt:
+        setDebug(INFO);
+        Serial.println("Trying to sync the time...");
+        boolean timeSynched = ezt::waitForSync(30);
+        if (timeSynched)
         {
-            delay(100);
-            attempts++;
-            serial.print(".");
-        }
-
-        if (WiFi.status() == WL_CONNECTED)
-        {
-            serial.println("");
-            serial.println("WiFi connected");
-            serial.println("IP address: ");
-            serial.println(WiFi.localIP());
-        // init and get the time
-        // const char *ntpServer = "pool.ntp.org";
-        // configTime(3600 /*gmtOffset_sec*/, 3600 /*daylightOffset_sec*/, ntpServer);
-        // ezt::setServer("pool.ntp.org"); // Set the NTP server address
-        ezt:
-            setDebug(INFO);
-            Serial.println("Trying to sync the time...");
-            boolean timeSynched = ezt::waitForSync(30);
-            if (timeSynched)
-            {
-                serial.println("Time synched: " + String(timeSynched));
-            }
-            else
-            {
-                serial.println("Time not synched: " + String(timeSynched));
-            }
-            Serial.println("Trying to set the location...");
-
-            boolean locationSet = Berlin.setLocation("Europe/Berlin"); // Set your location here
-
-            if (locationSet)
-            {
-                serial.println("Location set: " + Berlin.getTimezoneName());
-            }
-            else
-            {
-                serial.println("Location is not set: " + Berlin.getTimezoneName());
-            }
-
-            printLocalTime();
+            serial.println("Time synched: " + String(timeSynched));
         }
         else
         {
-            serial.println("");
-            serial.println("Failed to connect to WiFi, retry...");
-            WiFi.begin(ssid, password);
+            serial.println("Time not synched: " + String(timeSynched));
         }
+        Serial.println("Trying to set the location...");
+
+        boolean locationSet = Berlin.setLocation("Europe/Berlin"); // Set your location here
+
+        if (locationSet)
+        {
+            serial.println("Location set: " + Berlin.getTimezoneName());
+        }
+        else
+        {
+            serial.println("Location is not set: " + Berlin.getTimezoneName());
+        }
+
+        printLocalTime();
+    }
+    else
+    {
+        serial.println("");
+        serial.println("Failed to connect to WiFi, retry...");
+        WiFi.begin(ssid, password);
+    }
 #endif
 
-        if (!hardwareInitSucceeded)
-        {
+    if (!hardwareInitSucceeded)
+    {
 #ifdef USE_SERIAL
-            serial.println(F("Error: hardware init failed."));
-            serial.flush();
+        serial.println(F("Error: hardware init failed."));
+        serial.flush();
 #endif
 #ifdef USE_DISPLAY
-            // Following mesage shown only if failure was unrelated to I2C.
-            display.setCursor(COL_0, FRMCNTRS_ROW);
-            display.print(F("HW init failed"));
+        // Following mesage shown only if failure was unrelated to I2C.
+        display.setCursor(COL_0, FRMCNTRS_ROW);
+        display.print(F("HW init failed"));
 #endif
-            abort();
-        }
+        abort();
+    }
 
-        initLmic();
+    initLmic();
 
 //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▄ █▀▀ █▀▀ ▀█▀ █▀█
 //  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▄ █▀▀ █ █  █  █ █
@@ -1327,31 +1324,31 @@ void processWork(ostime_t doWorkJobTimeStamp)
 
 // Place code for initializing sensors etc. here.
 #ifdef USE_ADC
-        Wire.begin(21, 22);
-        ads1.begin(0x48);
-        ads1.setGain(GAIN_ONE);
+    Wire.begin(21, 22);
+    ads1.begin(0x48);
+    ads1.setGain(GAIN_ONE);
 #endif
 
-        resetCounter();
+    resetCounter();
 
-        dataToSendViaLora.intervalIds[0] = intervalId;
-        dataToSendViaLora.intervalIds[1] = (intervalId - 1);
-        dataToSendViaLora.intervalIds[2] = (intervalId - 2);
+    dataToSendViaLora.intervalIds[0] = intervalId;
+    dataToSendViaLora.intervalIds[1] = (intervalId - 1);
+    dataToSendViaLora.intervalIds[2] = (intervalId - 2);
 
-        //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▀ █▀█ █▀▄
-        //  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▀ █ █ █ █
-        //  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀   ▀▀▀ ▀▀▀ ▀▀  ▀▀▀   ▀▀▀ ▀ ▀ ▀▀
+    //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▀ █▀█ █▀▄
+    //  █ █ ▀▀█ █▀▀ █▀▄   █   █ █ █ █ █▀▀   █▀▀ █ █ █ █
+    //  ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀   ▀▀▀ ▀▀▀ ▀▀  ▀▀▀   ▀▀▀ ▀ ▀ ▀▀
 
-        if (activationMode == ActivationMode::OTAA)
-        {
-            LMIC_startJoining();
-        }
-
-        // Schedule initial doWork job for immediate execution.
-        os_setCallback(&doWorkJob, doWorkCallback);
-    }
-
-    void loop()
+    if (activationMode == ActivationMode::OTAA)
     {
-        os_runloop_once();
+        LMIC_startJoining();
     }
+
+    // Schedule initial doWork job for immediate execution.
+    os_setCallback(&doWorkJob, doWorkCallback);
+}
+
+void loop()
+{
+    os_runloop_once();
+}
