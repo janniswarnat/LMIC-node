@@ -88,9 +88,8 @@ uint8_t intervalId = random(256);
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
-unsigned long static loraIntervalStartMillis = millis();
-unsigned long static currentMillis = millis();
 const uint16_t loraSendOutInterval = 600;
+uint16_t static loraSendOutIntervalCounter = 0;
 
 #ifdef USE_ADC
 Adafruit_ADS1115 ads1;
@@ -118,10 +117,15 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 #endif
 
 #ifdef USE_WIFI
-float static litersInWifiSendOutInterval = 0;
-unsigned long static wifiIntervalStartMillis = loraIntervalStartMillis;
+struct DataPoint
+{
+    unsigned long timestamp;
+    float flow;
+};
 boolean sendOutDataViaWifi = false;
 const uint16_t wifiSendOutInterval = 60;
+uint16_t static wifiSendOutIntervalCounter = 0;
+DataPoint static dataPoints[wifiSendOutInterval] = {0};
 const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASSWORD;
 const char *bearerToken = BEARER_TOKEN;
@@ -153,7 +157,7 @@ void printLocalTime()
     Serial.println(", Time: " + Berlin.dateTime());
 }
 
-void sendOutViaHttp(uint16_t value)
+void sendOutViaHttp()
 {
     HTTPClient http;
 
@@ -172,24 +176,29 @@ void sendOutViaHttp(uint16_t value)
     JsonObject meta = jsonPayload.createNestedObject("meta");
 
     JsonArray valueTypes = jsonPayload.createNestedArray("valueTypes");
-    JsonObject valueType1 = valueTypes.createNestedObject();
-    valueType1["name"] = "liters";
-    // valueType1["unit"] = "s";
-    valueType1["type"] = "Number";
+
+    // for (int i = 0; i < 60; i++)
+    //{
+    JsonObject valueType = valueTypes.createNestedObject();
+    valueType["name"] = "liters";
+    valueType["type"] = "Number";
+    //}
 
     JsonArray values = jsonPayload.createNestedArray("values");
-    JsonObject value1 = values.createNestedObject();
 
-    // unsigned long now = Berlin.now();
-    unsigned long now = UTC.now();
-
-    value1["date"] = now * 1000LL;
-    JsonArray value1_values = value1.createNestedArray("value");
-    value1_values.add(value);
+    for (int i = 0; i < 60; i++)
+    {
+        JsonObject value = values.createNestedObject();
+        // unsigned long now = Berlin.now();
+        unsigned long now = UTC.now();
+        value["date"] = now * 1000LL;
+        JsonArray value_values = value.createNestedArray("value");
+        value_values.add(dataPoints[i].flow);
+    }
 
     // Convert JSON object into a string
     String jsonString;
-    serializeJson(jsonPayload, jsonString);
+    ArduinoJson::serializeJson(jsonPayload, jsonString);
 
     unsigned long startTime = millis();           // Record the start time
     int httpResponseCode = http.POST(jsonString); // Send the actual POST request
@@ -913,16 +922,15 @@ void collectFlowEachSecond()
     Serial.print(flow, 0);
     Serial.println(" l/min");
 
+#ifdef USE_WIFI
+    dataPoints[wifiSendOutIntervalCounter].timestamp = UTC.now();
+    dataPoints[wifiSendOutIntervalCounter].flow = flow;
+#endif
+
     litersInLoraSendOutInterval += roundf(flow * 10) / 10 / 60;
 
     Serial.print("litersInLoraSendOutInterval: ");
     Serial.println(litersInLoraSendOutInterval, 2);
-
-#ifdef USE_WIFI
-    litersInWifiSendOutInterval += roundf(flow * 10) / 10 / 60;
-    Serial.print("litersInWifiSendOutInterval: ");
-    Serial.println(litersInWifiSendOutInterval, 2);
-#endif
 
     // set values to send via ESPNOW
     dataToSendViaLora.litersInLastThreeLoraSendOutIntervals[0] = (uint16_t)(roundf(litersInLoraSendOutInterval));
@@ -980,21 +988,6 @@ void processWork(ostime_t doWorkJobTimeStamp)
     // reading sensor and GPS data and schedule uplink
     // messages if anything needs to be transmitted.
 
-    currentMillis = millis();
-    u_int16_t secondsPassedInLoraSendOutInterval = (currentMillis - loraIntervalStartMillis) / 1000;
-    Serial.print("Start processWork, seconds since start of current Lora send out interval: ");
-    Serial.print(secondsPassedInLoraSendOutInterval);
-    Serial.print(", sendOutDataViaLora: ");
-    Serial.println(sendOutDataViaLora);
-
-#ifdef USE_WIFI
-    u_int16_t secondsPassedInWifiSendOutInterval = (currentMillis - wifiIntervalStartMillis) / 1000;
-    Serial.print("Seconds since start of current Wifi send out interval: ");
-    Serial.print(secondsPassedInWifiSendOutInterval);
-    Serial.print(", sendOutDataViaWifi: ");
-    Serial.println(sendOutDataViaWifi);
-#endif
-
 #ifdef USE_ADC
     collectFlowEachSecond();
 #endif
@@ -1035,27 +1028,29 @@ void processWork(ostime_t doWorkJobTimeStamp)
     serial.println(counterValue);
 #endif
 
-    if (secondsPassedInLoraSendOutInterval >= loraSendOutInterval)
+    if (loraSendOutIntervalCounter >= loraSendOutInterval)
     {
         Serial.println("sendOutDataViaLora = true since loraSendOutInterval ended");
-        Serial.print("secondsPassedInLoraSendOutInterval: ");
-        Serial.print(secondsPassedInLoraSendOutInterval);
+        Serial.print("loraSendOutIntervalCounter: ");
+        Serial.print(loraSendOutIntervalCounter);
         Serial.print(", loraSendOutInterval: ");
         Serial.println(loraSendOutInterval);
         sendOutDataViaLora = true;
     }
+    loraSendOutIntervalCounter++;
 
 #ifdef USE_WIFI
 
-    if (secondsPassedInWifiSendOutInterval >= wifiSendOutInterval)
+    if (wifiSendOutIntervalCounter >= wifiSendOutInterval)
     {
         Serial.println("sendOutDataViaWifi = true from USE_WIFI since wifiSendOutInterval ended");
-        Serial.print("secondsPassedInWifiSendOutInterval: ");
-        Serial.print(secondsPassedInWifiSendOutInterval);
+        Serial.print("wifiSendOutIntervalCounter: ");
+        Serial.print(wifiSendOutIntervalCounter);
         Serial.print(", wifiSendOutInterval: ");
         Serial.println(wifiSendOutInterval);
         sendOutDataViaWifi = true;
     }
+    wifiSendOutIntervalCounter++;
 
     if (WiFi.status() == WL_CONNECTED)
     {
@@ -1076,20 +1071,19 @@ void processWork(ostime_t doWorkJobTimeStamp)
     if (sendOutDataViaWifi)
     {
         sendOutDataViaWifi = false;
-        wifiIntervalStartMillis = millis();
-        Serial.print("sendOutDataViaWifi was true; reset to false, resetting wifiIntervalStartMillis: ");
-        Serial.println(wifiIntervalStartMillis);
-        sendOutViaHttp((uint16_t)(roundf(litersInWifiSendOutInterval)));
-        litersInWifiSendOutInterval = 0;
+        wifiSendOutIntervalCounter = 0;
+        Serial.print("sendOutDataViaWifi was true; reset to false, resetting wifiSendOutIntervalCounter: ");
+        Serial.println(wifiSendOutIntervalCounter);
+        sendOutViaHttp();
     }
 #endif
 
     if (sendOutDataViaLora)
     {
         sendOutDataViaLora = false;
-        loraIntervalStartMillis = millis();
-        Serial.print("sendOutDataViaLora was true; reset to false, resetting loraIntervalStartMillis: ");
-        Serial.println(loraIntervalStartMillis);
+        loraSendOutIntervalCounter = 0;
+        Serial.print("sendOutDataViaLora was true; reset to false, resetting loraSendOutIntervalCounter: ");
+        Serial.println(loraSendOutIntervalCounter);
 
         // Skip processWork if using OTAA and still joining.
         if (LMIC.devaddr != 0)
