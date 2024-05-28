@@ -119,7 +119,7 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 #ifdef USE_WIFI
 struct DataPoint
 {
-    unsigned long timestamp;
+    unsigned long long timestamp;
     float flow;
 };
 boolean sendOutDataViaWifi = false;
@@ -188,17 +188,20 @@ void sendOutViaHttp()
 
     for (int i = 0; i < 60; i++)
     {
+        //Serial.print("Putting timestamp to json: ");
+        //Serial.println(dataPoints[i].timestamp);
         JsonObject value = values.createNestedObject();
-        // unsigned long now = Berlin.now();
-        unsigned long now = UTC.now();
-        value["date"] = now * 1000LL;
+        value["date"] = dataPoints[i].timestamp;
         JsonArray value_values = value.createNestedArray("value");
         value_values.add(dataPoints[i].flow);
     }
 
     // Convert JSON object into a string
     String jsonString;
-    ArduinoJson::serializeJson(jsonPayload, jsonString);
+    serializeJson(jsonPayload, jsonString);
+    String jsonPrettyString;
+    serializeJsonPretty(jsonPayload, jsonPrettyString);
+    //Serial.println(jsonPrettyString);
 
     unsigned long startTime = millis();           // Record the start time
     int httpResponseCode = http.POST(jsonString); // Send the actual POST request
@@ -923,8 +926,16 @@ void collectFlowEachSecond()
     Serial.println(" l/min");
 
 #ifdef USE_WIFI
-    dataPoints[wifiSendOutIntervalCounter].timestamp = UTC.now();
-    dataPoints[wifiSendOutIntervalCounter].flow = flow;
+    unsigned long now = UTC.now();
+    unsigned long long nowMilli = now * 1000LL;
+    Serial.print("now: ");
+    Serial.println(now);
+    Serial.print("nowMilli: ");
+    Serial.println(nowMilli);
+    dataPoints[wifiSendOutIntervalCounter].timestamp = nowMilli;
+    Serial.print("dataPoints[wifiSendOutIntervalCounter].timestamp: ");
+    Serial.println(dataPoints[wifiSendOutIntervalCounter].timestamp);
+    dataPoints[wifiSendOutIntervalCounter].flow = roundf(flow * 10) / 10 / 60;
 #endif
 
     litersInLoraSendOutInterval += roundf(flow * 10) / 10 / 60;
@@ -1027,6 +1038,11 @@ void processWork(ostime_t doWorkJobTimeStamp)
     serial.print(F("COUNTER value: "));
     serial.println(counterValue);
 #endif
+
+    serial.print("loraSendOutIntervalCounter: ");
+    serial.println(loraSendOutIntervalCounter);
+    serial.print("wifiSendOutIntervalCounter: ");
+    serial.println(wifiSendOutIntervalCounter);
 
     if (loraSendOutIntervalCounter >= loraSendOutInterval)
     {
