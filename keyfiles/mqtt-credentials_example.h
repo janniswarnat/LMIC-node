@@ -37,5 +37,6 @@
 #define MQTT_USER "<USER>"
 #define MQTT_PASSWORD "<PASSWORD>"
 #define MQTT_CLIENT_ID "<CLIENT_ID>"
+#define MQTT_TOPIC "<TOPIC>"
 
 #endif  // MQTT_CREDENTIALS_H_

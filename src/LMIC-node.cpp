@@ -135,6 +135,7 @@ const u_int16_t mqttPort = MQTT_PORT;
 const char *mqttUser = MQTT_USER;
 const char *mqttPassword = MQTT_PASSWORD;
 const char *mqttClientId = MQTT_CLIENT_ID;
+const char *mqttTopic = MQTT_TOPIC;
 
 Timezone Berlin;
 
@@ -170,6 +171,7 @@ void printLocalTime()
 void sendOutViaMqtt(long long timestamp, float flow)
 {
     mqttClient.setServer(mqttBroker, mqttPort);
+    mqttClient.loop();
     if (!mqttClient.connected())
     {
         mqttClient.connect(mqttClientId, mqttUser, mqttPassword);
@@ -207,8 +209,7 @@ void sendOutViaMqtt(long long timestamp, float flow)
         // Convert JSON object into a string
         String jsonString;
         serializeJson(jsonPayload, jsonString);
-        String jsonPrettyString;
-        serializeJsonPretty(jsonPayload, jsonPrettyString);
+        mqttClient.publish(mqttTopic, jsonString.c_str());
     }
 }
 
