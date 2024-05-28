@@ -84,6 +84,7 @@ enum class ActivationMode {OTAA, ABP};
 #ifdef USE_WIFI
     #include "../keyfiles/wifi-credentials.h"
     #include "../keyfiles/bearer-token.h"
+    #include "../keyfiles/mqtt-credentials.h"
 #endif
 
     

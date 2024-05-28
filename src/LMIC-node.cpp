@@ -65,6 +65,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <ezTime.h>
+#include <PubSubClient.h>
 #endif
 
 //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▄ █▀▀ █▀▀ ▀█▀ █▀█
@@ -129,7 +130,16 @@ DataPoint static dataPoints[wifiSendOutInterval] = {0};
 const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASSWORD;
 const char *bearerToken = BEARER_TOKEN;
+const char *mqttBroker = MQTT_BROKER;
+const u_int16_t mqttPort = MQTT_PORT;
+const char *mqttUser = MQTT_USER;
+const char *mqttPassword = MQTT_PASSWORD;
+const char *mqttClientId = MQTT_CLIENT_ID;
+
 Timezone Berlin;
+
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
 
 void WiFiEvent(WiFiEvent_t event)
 {
@@ -155,6 +165,51 @@ void printLocalTime()
     Serial.print("Location: " + Berlin.getTimezoneName());
     // Serial.print(", Olson: "+Berlin.getOlson());
     Serial.println(", Time: " + Berlin.dateTime());
+}
+
+void sendOutViaMqtt(long long timestamp, float flow)
+{
+    mqttClient.setServer(mqttBroker, mqttPort);
+    if (!mqttClient.connected())
+    {
+        mqttClient.connect(mqttClientId, mqttUser, mqttPassword);
+    }
+
+    if (mqttClient.connected())
+
+    {
+        Serial.println("connected");
+        JsonDocument jsonPayload;
+
+        jsonPayload["id"] = "unique-id";
+        jsonPayload["source"] = "post-request-test";
+        jsonPayload["name"] = "Post Request Test";
+        jsonPayload["user"] = "admin_cw";
+
+        JsonObject meta = jsonPayload.createNestedObject("meta");
+
+        JsonArray valueTypes = jsonPayload.createNestedArray("valueTypes");
+
+        // for (int i = 0; i < 60; i++)
+        //{
+        JsonObject valueType = valueTypes.createNestedObject();
+        valueType["name"] = "liters";
+        valueType["type"] = "Number";
+        //}
+
+        JsonArray values = jsonPayload.createNestedArray("values");
+
+        JsonObject value = values.createNestedObject();
+        value["date"] = timestamp;
+        JsonArray value_values = value.createNestedArray("value");
+        value_values.add(flow);
+
+        // Convert JSON object into a string
+        String jsonString;
+        serializeJson(jsonPayload, jsonString);
+        String jsonPrettyString;
+        serializeJsonPretty(jsonPayload, jsonPrettyString);
+    }
 }
 
 void sendOutViaHttp()
@@ -188,8 +243,8 @@ void sendOutViaHttp()
 
     for (int i = 0; i < 60; i++)
     {
-        //Serial.print("Putting timestamp to json: ");
-        //Serial.println(dataPoints[i].timestamp);
+        // Serial.print("Putting timestamp to json: ");
+        // Serial.println(dataPoints[i].timestamp);
         JsonObject value = values.createNestedObject();
         value["date"] = dataPoints[i].timestamp;
         JsonArray value_values = value.createNestedArray("value");
@@ -201,7 +256,7 @@ void sendOutViaHttp()
     serializeJson(jsonPayload, jsonString);
     String jsonPrettyString;
     serializeJsonPretty(jsonPayload, jsonPrettyString);
-    //Serial.println(jsonPrettyString);
+    // Serial.println(jsonPrettyString);
 
     unsigned long startTime = millis();           // Record the start time
     int httpResponseCode = http.POST(jsonString); // Send the actual POST request
@@ -936,6 +991,7 @@ void collectFlowEachSecond()
     Serial.print("dataPoints[wifiSendOutIntervalCounter].timestamp: ");
     Serial.println(dataPoints[wifiSendOutIntervalCounter].timestamp);
     dataPoints[wifiSendOutIntervalCounter].flow = roundf(flow * 10) / 10 / 60;
+    sendOutViaMqtt(nowMilli, roundf(flow * 10) / 10 / 60);
 #endif
 
     litersInLoraSendOutInterval += roundf(flow * 10) / 10 / 60;
@@ -1090,7 +1146,7 @@ void processWork(ostime_t doWorkJobTimeStamp)
         wifiSendOutIntervalCounter = 0;
         Serial.print("sendOutDataViaWifi was true; reset to false, resetting wifiSendOutIntervalCounter: ");
         Serial.println(wifiSendOutIntervalCounter);
-        sendOutViaHttp();
+        // sendOutViaHttp();
     }
 #endif
 
@@ -1303,6 +1359,25 @@ void setup()
         }
 
         printLocalTime();
+
+        mqttClient.setServer(mqttBroker, mqttPort);
+        attempts = 0;
+        while (attempts <= maxConnectionAttempts && !mqttClient.connected())
+        {
+            Serial.print("Connecting to MQTT Broker...");
+            if (mqttClient.connect(mqttClientId, mqttUser, mqttPassword))
+            {
+                Serial.println("connected");
+            }
+            else
+            {
+                Serial.print("failed, rc=");
+                Serial.print(mqttClient.state());
+                Serial.println(" try again in 0.1 seconds");
+                attempts++;
+                delay(100);
+            }
+        }
     }
     else
     {
