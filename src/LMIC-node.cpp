@@ -180,7 +180,7 @@ void sendOutViaMqtt(long long timestamp, float flow)
     if (mqttClient.connected())
 
     {
-        Serial.println("connected");
+        Serial.println("connected to MQTT broker");
         JsonDocument jsonPayload;
 
         jsonPayload["id"] = "unique-id";
@@ -988,6 +988,8 @@ void collectFlowEachSecond()
     Serial.println(now);
     Serial.print("nowMilli: ");
     Serial.println(nowMilli);
+    Serial.print("wifiSendOutIntervalCounter: ");
+    Serial.println(wifiSendOutIntervalCounter);
     dataPoints[wifiSendOutIntervalCounter].timestamp = nowMilli;
     Serial.print("dataPoints[wifiSendOutIntervalCounter].timestamp: ");
     Serial.println(dataPoints[wifiSendOutIntervalCounter].timestamp);
@@ -1114,7 +1116,7 @@ void processWork(ostime_t doWorkJobTimeStamp)
 
 #ifdef USE_WIFI
 
-    if (wifiSendOutIntervalCounter >= wifiSendOutInterval)
+    if (wifiSendOutIntervalCounter >= (wifiSendOutInterval-1))
     {
         Serial.println("sendOutDataViaWifi = true from USE_WIFI since wifiSendOutInterval ended");
         Serial.print("wifiSendOutIntervalCounter: ");
@@ -1368,7 +1370,7 @@ void setup()
             Serial.print("Connecting to MQTT Broker...");
             if (mqttClient.connect(mqttClientId, mqttUser, mqttPassword))
             {
-                Serial.println("connected");
+                Serial.println("connected to MQTT broker");
             }
             else
             {
