@@ -136,6 +136,9 @@ const char *mqttUser = MQTT_USER;
 const char *mqttPassword = MQTT_PASSWORD;
 const char *mqttClientId = MQTT_CLIENT_ID;
 const char *mqttTopic = MQTT_TOPIC;
+const char *openwareUniqueSensorId = OPENWARE_UNIQUE_SENSOR_ID;
+const char *openwareHumanReadableSensorName = OPENWARE_HUMAN_READABLE_SENSOR_NAME;
+const char *openWareSourceTag = OPENWARE_SOURCE_TAG;
 
 Timezone Berlin;
 
@@ -183,10 +186,10 @@ void sendOutViaMqtt(long long timestamp, float flow)
         Serial.println("connected to MQTT broker");
         JsonDocument jsonPayload;
 
-        jsonPayload["id"] = "unique-id";
-        jsonPayload["source"] = "post-request-test";
-        jsonPayload["name"] = "Post Request Test";
-        jsonPayload["user"] = "admin_cw";
+        jsonPayload["id"] = openwareUniqueSensorId;
+        jsonPayload["source"] = openWareSourceTag;
+        jsonPayload["name"] = openwareHumanReadableSensorName;
+        jsonPayload["user"] = openWareSourceTag;
 
         JsonObject meta = jsonPayload.createNestedObject("meta");
 
@@ -209,6 +212,9 @@ void sendOutViaMqtt(long long timestamp, float flow)
         // Convert JSON object into a string
         String jsonString;
         serializeJson(jsonPayload, jsonString);
+        String jsonPrettyString;
+        serializeJsonPretty(jsonPayload, jsonPrettyString);
+        //Serial.println(jsonPrettyString);
         mqttClient.publish(mqttTopic, jsonString.c_str());
     }
 }
