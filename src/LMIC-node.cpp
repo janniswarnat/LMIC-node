@@ -123,10 +123,12 @@ struct DataPoint
     unsigned long long timestamp;
     float flow;
 };
-boolean sendOutDataViaWifi = false;
-const uint16_t wifiSendOutInterval = 60;
-uint16_t static wifiSendOutIntervalCounter = 0;
-DataPoint static dataPoints[wifiSendOutInterval] = {0};
+// boolean sendOutDataViaWifi = false;
+boolean timeSynched = false;
+boolean locationSet = false;
+// const uint16_t wifiSendOutInterval = 60;
+// uint16_t static wifiSendOutIntervalCounter = 0;
+// DataPoint static dataPoints[wifiSendOutInterval] = {0};
 const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASSWORD;
 const char *bearerToken = BEARER_TOKEN;
@@ -171,6 +173,114 @@ void printLocalTime()
     Serial.println(", Time: " + Berlin.dateTime());
 }
 
+#ifdef USE_WIFI
+bool checkInternetConnection()
+{
+    HTTPClient http;
+    http.begin("http://www.google.com");
+    int httpCode = http.GET();
+    http.end();
+
+    return (httpCode > 0 && httpCode == HTTP_CODE_OK);
+}
+
+void connectToMqtt()
+{
+    mqttClient.setServer(mqttBroker, mqttPort);
+    // attempts = 0;
+    // while (attempts <= maxConnectionAttempts && !mqttClient.connected())
+    if (!mqttClient.connected() && checkInternetConnection())
+    {
+        Serial.print("Connecting to MQTT Broker...");
+        if (mqttClient.connect(mqttClientId, mqttUser, mqttPassword))
+        {
+            Serial.println("connected to MQTT broker");
+        }
+        else
+        {
+            Serial.print("failed, rc=");
+            Serial.print(mqttClient.state());
+            // Serial.println(" try again in 0.1 seconds");
+            // attempts++;
+            // delay(100);
+        }
+    }
+}
+
+void connectToWiFi()
+{
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        // Attempt to connect to Wifi network:
+        serial.print("Connecting to ");
+        Serial.println(ssid);
+        WiFi.onEvent(WiFiEvent);
+        WiFi.begin(ssid, password);
+    }
+    // uint8_t maxConnectionAttempts = 255;
+    // uint8_t attempts = 0;
+
+    // while (attempts <= maxConnectionAttempts && (WiFi.status() != WL_CONNECTED))
+    // {
+    //     delay(100);
+    //     attempts++;
+    //     serial.print(".");
+    // }
+
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        serial.println("");
+        serial.println("WiFi connected");
+        serial.println("IP address: ");
+        serial.println(WiFi.localIP());
+
+        if (timeSynched)
+        {
+            serial.println("Time synched: " + String(timeSynched));
+            if (!locationSet)
+            {
+                Serial.println("Trying to set the location...");
+
+                locationSet = Berlin.setLocation("Europe/Berlin"); // Set your location here
+
+                if (locationSet)
+                {
+                    serial.println("Location set: " + Berlin.getTimezoneName());
+                }
+                else
+                {
+                    serial.println("Location is not set: " + Berlin.getTimezoneName());
+                }
+            }
+        }
+        else
+        {
+            serial.println("Time not synched: " + String(timeSynched));
+            // init and get the time
+            // const char *ntpServer = "pool.ntp.org";
+            // configTime(3600 /*gmtOffset_sec*/, 3600 /*daylightOffset_sec*/, ntpServer);
+            // ezt::setServer("pool.ntp.org"); // Set the NTP server address
+            // ezt:
+            setDebug(INFO);
+            Serial.println("Trying to sync the time...");
+            if (checkInternetConnection())
+            {
+                timeSynched = ezt::waitForSync(30);
+            }
+        }
+
+        printLocalTime();
+        connectToMqtt();
+    }
+    else
+    {
+        serial.println("");
+        serial.println("Failed to connect to WiFi, retry...");
+        WiFi.begin(ssid, password);
+    }
+}
+#endif
+
 void sendOutViaMqtt(long long timestamp, float flow)
 {
     mqttClient.setServer(mqttBroker, mqttPort);
@@ -214,81 +324,81 @@ void sendOutViaMqtt(long long timestamp, float flow)
         serializeJson(jsonPayload, jsonString);
         String jsonPrettyString;
         serializeJsonPretty(jsonPayload, jsonPrettyString);
-        //Serial.println(jsonPrettyString);
+        // Serial.println(jsonPrettyString);
         mqttClient.publish(mqttTopic, jsonString.c_str());
     }
 }
 
-void sendOutViaHttp()
-{
-    HTTPClient http;
+// void sendOutViaHttp()
+// {
+//     HTTPClient http;
 
-    http.begin("https://data.digitalzentrum-lr.de/api/data/push"); // Specify destination for HTTP request
-    http.addHeader("Content-Type", "application/json");            // Specify content-type header
-    http.addHeader("Authorization", bearerToken);                  // Specify authorization header
+//     http.begin("https://data.digitalzentrum-lr.de/api/data/push"); // Specify destination for HTTP request
+//     http.addHeader("Content-Type", "application/json");            // Specify content-type header
+//     http.addHeader("Authorization", bearerToken);                  // Specify authorization header
 
-    // Create a JSON object
-    JsonDocument jsonPayload;
+//     // Create a JSON object
+//     JsonDocument jsonPayload;
 
-    jsonPayload["id"] = "unique-id";
-    jsonPayload["source"] = "post-request-test";
-    jsonPayload["name"] = "Post Request Test";
-    jsonPayload["user"] = "admin_cw";
+//     jsonPayload["id"] = "unique-id";
+//     jsonPayload["source"] = "post-request-test";
+//     jsonPayload["name"] = "Post Request Test";
+//     jsonPayload["user"] = "admin_cw";
 
-    JsonObject meta = jsonPayload.createNestedObject("meta");
+//     JsonObject meta = jsonPayload.createNestedObject("meta");
 
-    JsonArray valueTypes = jsonPayload.createNestedArray("valueTypes");
+//     JsonArray valueTypes = jsonPayload.createNestedArray("valueTypes");
 
-    // for (int i = 0; i < 60; i++)
-    //{
-    JsonObject valueType = valueTypes.createNestedObject();
-    valueType["name"] = "liters";
-    valueType["type"] = "Number";
-    //}
+//     // for (int i = 0; i < 60; i++)
+//     //{
+//     JsonObject valueType = valueTypes.createNestedObject();
+//     valueType["name"] = "liters";
+//     valueType["type"] = "Number";
+//     //}
 
-    JsonArray values = jsonPayload.createNestedArray("values");
+//     JsonArray values = jsonPayload.createNestedArray("values");
 
-    for (int i = 0; i < 60; i++)
-    {
-        // Serial.print("Putting timestamp to json: ");
-        // Serial.println(dataPoints[i].timestamp);
-        JsonObject value = values.createNestedObject();
-        value["date"] = dataPoints[i].timestamp;
-        JsonArray value_values = value.createNestedArray("value");
-        value_values.add(dataPoints[i].flow);
-    }
+//     for (int i = 0; i < 60; i++)
+//     {
+//         // Serial.print("Putting timestamp to json: ");
+//         // Serial.println(dataPoints[i].timestamp);
+//         JsonObject value = values.createNestedObject();
+//         value["date"] = dataPoints[i].timestamp;
+//         JsonArray value_values = value.createNestedArray("value");
+//         value_values.add(dataPoints[i].flow);
+//     }
 
-    // Convert JSON object into a string
-    String jsonString;
-    serializeJson(jsonPayload, jsonString);
-    String jsonPrettyString;
-    serializeJsonPretty(jsonPayload, jsonPrettyString);
-    // Serial.println(jsonPrettyString);
+//     // Convert JSON object into a string
+//     String jsonString;
+//     serializeJson(jsonPayload, jsonString);
+//     String jsonPrettyString;
+//     serializeJsonPretty(jsonPayload, jsonPrettyString);
+//     // Serial.println(jsonPrettyString);
 
-    unsigned long startTime = millis();           // Record the start time
-    int httpResponseCode = http.POST(jsonString); // Send the actual POST request
+//     unsigned long startTime = millis();           // Record the start time
+//     int httpResponseCode = http.POST(jsonString); // Send the actual POST request
 
-    if (httpResponseCode > 0)
-    {
-        String response = http.getString(); // Get the response to the request
+//     if (httpResponseCode > 0)
+//     {
+//         String response = http.getString(); // Get the response to the request
 
-        unsigned long endTime = millis();             // Record the end time
-        unsigned long duration = endTime - startTime; // Calculate the duration
+//         unsigned long endTime = millis();             // Record the end time
+//         unsigned long duration = endTime - startTime; // Calculate the duration
 
-        Serial.println(httpResponseCode); // Print return code
-        Serial.println(response);         // Print request answer
-        Serial.print(duration);
-        Serial.println(" ms"); // Print the duration
-    }
-    else
-    {
+//         Serial.println(httpResponseCode); // Print return code
+//         Serial.println(response);         // Print request answer
+//         Serial.print(duration);
+//         Serial.println(" ms"); // Print the duration
+//     }
+//     else
+//     {
 
-        Serial.print("Error on sending POST: ");
-        Serial.println(httpResponseCode);
-    }
+//         Serial.print("Error on sending POST: ");
+//         Serial.println(httpResponseCode);
+//     }
 
-    http.end(); // Free resources
-}
+//     http.end(); // Free resources
+// }
 
 #endif
 
@@ -990,16 +1100,16 @@ void collectFlowEachSecond()
 #ifdef USE_WIFI
     unsigned long now = UTC.now();
     unsigned long long nowMilli = now * 1000LL;
-    Serial.print("now: ");
-    Serial.println(now);
-    Serial.print("nowMilli: ");
-    Serial.println(nowMilli);
-    Serial.print("wifiSendOutIntervalCounter: ");
-    Serial.println(wifiSendOutIntervalCounter);
-    dataPoints[wifiSendOutIntervalCounter].timestamp = nowMilli;
-    Serial.print("dataPoints[wifiSendOutIntervalCounter].timestamp: ");
-    Serial.println(dataPoints[wifiSendOutIntervalCounter].timestamp);
-    dataPoints[wifiSendOutIntervalCounter].flow = roundf(flow * 10) / 10 / 60;
+    // Serial.print("now: ");
+    // Serial.println(now);
+    // Serial.print("nowMilli: ");
+    // Serial.println(nowMilli);
+    // Serial.print("wifiSendOutIntervalCounter: ");
+    // Serial.println(wifiSendOutIntervalCounter);
+    // dataPoints[wifiSendOutIntervalCounter].timestamp = nowMilli;
+    // Serial.print("dataPoints[wifiSendOutIntervalCounter].timestamp: ");
+    // Serial.println(dataPoints[wifiSendOutIntervalCounter].timestamp);
+    // dataPoints[wifiSendOutIntervalCounter].flow = roundf(flow * 10) / 10 / 60;
     sendOutViaMqtt(nowMilli, roundf(flow * 10) / 10 / 60);
 #endif
 
@@ -1106,8 +1216,8 @@ void processWork(ostime_t doWorkJobTimeStamp)
 
     serial.print("loraSendOutIntervalCounter: ");
     serial.println(loraSendOutIntervalCounter);
-    serial.print("wifiSendOutIntervalCounter: ");
-    serial.println(wifiSendOutIntervalCounter);
+    // serial.print("wifiSendOutIntervalCounter: ");
+    // serial.println(wifiSendOutIntervalCounter);
 
     if (loraSendOutIntervalCounter >= loraSendOutInterval)
     {
@@ -1121,42 +1231,42 @@ void processWork(ostime_t doWorkJobTimeStamp)
     loraSendOutIntervalCounter++;
 
 #ifdef USE_WIFI
+    connectToWiFi();
+    // if (wifiSendOutIntervalCounter >= (wifiSendOutInterval - 1))
+    // {
+    //     Serial.println("sendOutDataViaWifi = true from USE_WIFI since wifiSendOutInterval ended");
+    //     Serial.print("wifiSendOutIntervalCounter: ");
+    //     Serial.print(wifiSendOutIntervalCounter);
+    //     Serial.print(", wifiSendOutInterval: ");
+    //     Serial.println(wifiSendOutInterval);
+    //     sendOutDataViaWifi = true;
+    // }
+    // wifiSendOutIntervalCounter++;
 
-    if (wifiSendOutIntervalCounter >= (wifiSendOutInterval-1))
-    {
-        Serial.println("sendOutDataViaWifi = true from USE_WIFI since wifiSendOutInterval ended");
-        Serial.print("wifiSendOutIntervalCounter: ");
-        Serial.print(wifiSendOutIntervalCounter);
-        Serial.print(", wifiSendOutInterval: ");
-        Serial.println(wifiSendOutInterval);
-        sendOutDataViaWifi = true;
-    }
-    wifiSendOutIntervalCounter++;
+    //     if (WiFi.status() == WL_CONNECTED)
+    //     {
+    //         String status = "Connected to WiFi. IP address: " + WiFi.localIP().toString() + ", MAC: " + WiFi.macAddress();
+    //         printLocalTime();
+    // #ifdef USE_SERIAL
+    //         printEvent(timestamp, status.c_str(), PrintTarget::Serial);
+    // #endif
+    //     }
+    //     else
+    //     {
+    //         String status = "Not connected to WiFi, MAC: " + WiFi.macAddress();
+    // #ifdef USE_SERIAL
+    //         printEvent(timestamp, status.c_str(), PrintTarget::Serial);
+    // #endif
+    //     }
 
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        String status = "Connected to WiFi. IP address: " + WiFi.localIP().toString() + ", MAC: " + WiFi.macAddress();
-        printLocalTime();
-#ifdef USE_SERIAL
-        printEvent(timestamp, status.c_str(), PrintTarget::Serial);
-#endif
-    }
-    else
-    {
-        String status = "Not connected to WiFi, MAC: " + WiFi.macAddress();
-#ifdef USE_SERIAL
-        printEvent(timestamp, status.c_str(), PrintTarget::Serial);
-#endif
-    }
-
-    if (sendOutDataViaWifi)
-    {
-        sendOutDataViaWifi = false;
-        wifiSendOutIntervalCounter = 0;
-        Serial.print("sendOutDataViaWifi was true; reset to false, resetting wifiSendOutIntervalCounter: ");
-        Serial.println(wifiSendOutIntervalCounter);
-        // sendOutViaHttp();
-    }
+    // if (sendOutDataViaWifi)
+    // {
+    //     sendOutDataViaWifi = false;
+    //     wifiSendOutIntervalCounter = 0;
+    //     Serial.print("sendOutDataViaWifi was true; reset to false, resetting wifiSendOutIntervalCounter: ");
+    //     Serial.println(wifiSendOutIntervalCounter);
+    //     // sendOutViaHttp();
+    // }
 #endif
 
     if (sendOutDataViaLora)
@@ -1316,84 +1426,7 @@ void setup()
 #endif
 
 #ifdef USE_WIFI
-    // Attempt to connect to Wifi network:
-    serial.print("Connecting to ");
-    Serial.println(ssid);
-    WiFi.onEvent(WiFiEvent);
-    WiFi.begin(ssid, password);
-
-    uint8_t maxConnectionAttempts = 255;
-    uint8_t attempts = 0;
-
-    while (attempts <= maxConnectionAttempts && (WiFi.status() != WL_CONNECTED))
-    {
-        delay(100);
-        attempts++;
-        serial.print(".");
-    }
-
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        serial.println("");
-        serial.println("WiFi connected");
-        serial.println("IP address: ");
-        serial.println(WiFi.localIP());
-    // init and get the time
-    // const char *ntpServer = "pool.ntp.org";
-    // configTime(3600 /*gmtOffset_sec*/, 3600 /*daylightOffset_sec*/, ntpServer);
-    // ezt::setServer("pool.ntp.org"); // Set the NTP server address
-    ezt:
-        setDebug(INFO);
-        Serial.println("Trying to sync the time...");
-        boolean timeSynched = ezt::waitForSync(30);
-        if (timeSynched)
-        {
-            serial.println("Time synched: " + String(timeSynched));
-        }
-        else
-        {
-            serial.println("Time not synched: " + String(timeSynched));
-        }
-        Serial.println("Trying to set the location...");
-
-        boolean locationSet = Berlin.setLocation("Europe/Berlin"); // Set your location here
-
-        if (locationSet)
-        {
-            serial.println("Location set: " + Berlin.getTimezoneName());
-        }
-        else
-        {
-            serial.println("Location is not set: " + Berlin.getTimezoneName());
-        }
-
-        printLocalTime();
-
-        mqttClient.setServer(mqttBroker, mqttPort);
-        attempts = 0;
-        while (attempts <= maxConnectionAttempts && !mqttClient.connected())
-        {
-            Serial.print("Connecting to MQTT Broker...");
-            if (mqttClient.connect(mqttClientId, mqttUser, mqttPassword))
-            {
-                Serial.println("connected to MQTT broker");
-            }
-            else
-            {
-                Serial.print("failed, rc=");
-                Serial.print(mqttClient.state());
-                Serial.println(" try again in 0.1 seconds");
-                attempts++;
-                delay(100);
-            }
-        }
-    }
-    else
-    {
-        serial.println("");
-        serial.println("Failed to connect to WiFi, retry...");
-        WiFi.begin(ssid, password);
-    }
+    connectToWiFi();
 #endif
 
     if (!hardwareInitSucceeded)
