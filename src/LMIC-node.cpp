@@ -145,8 +145,9 @@ const char *openWareSourceTag = OPENWARE_SOURCE_TAG;
 
 Timezone Berlin;
 
-WiFiClient wifiClient;
-PubSubClient mqttClient(wifiClient);
+WiFiClient wifiClientForMqtt;
+WiFiClient connectionChecker;
+PubSubClient mqttClient(wifiClientForMqtt);
 
 void WiFiEvent(WiFiEvent_t event)
 {
@@ -175,25 +176,43 @@ void printLocalTime()
 }
 
 #ifdef USE_WIFI
-bool checkInternetConnection() {
-  if(wifiClient.connect("8.8.8.8", 53, 200)) {
-    return true;
-  }
-  return false;
+bool checkInternetConnection()
+{
+    if (connectionChecker.connect("8.8.8.8", 53, 200))
+    {
+        Serial.println("Connected to the internet");
+        connectionChecker.stop();
+        return true;
+    }
+    Serial.println("8.8.8.8 not reachable on port 53");
+    connectionChecker.stop();
+    return false;
 }
 
 void connectToMqtt()
 {
-    mqttClient.loop();
+    // mqttClient.loop();
     mqttClient.setServer(mqttBroker, mqttPort);
     // attempts = 0;
     // while (attempts <= maxConnectionAttempts && !mqttClient.connected())
     if (!mqttClient.connected() && checkInternetConnection())
     {
         Serial.print("Connecting to MQTT Broker...");
+        Serial.print("Broker: ");
+        Serial.println(mqttBroker);
+        Serial.print("Port: ");
+        Serial.println(mqttPort);
+        Serial.print("Client ID: ");
+        Serial.println(mqttClientId);
+        Serial.print("User: ");
+        Serial.println(mqttUser);
+        Serial.print("Password: ");
+        Serial.println(mqttPassword);
+        
         if (mqttClient.connect(mqttClientId, mqttUser, mqttPassword))
         {
             Serial.println("connected to MQTT broker");
+           
         }
         else
         {
@@ -204,6 +223,7 @@ void connectToMqtt()
             // delay(100);
         }
     }
+    mqttClient.loop();
 }
 
 void connectToWiFi()
