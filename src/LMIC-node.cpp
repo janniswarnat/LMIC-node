@@ -176,9 +176,7 @@ void printLocalTime()
 
 #ifdef USE_WIFI
 bool checkInternetConnection() {
-  // Attempt to resolve a known domain name
-  IPAddress ip;
-  if (WiFi.hostByName("www.google.com", ip)) {
+  if(wifiClient.connect("8.8.8.8", 53, 200)) {
     return true;
   }
   return false;
@@ -186,6 +184,7 @@ bool checkInternetConnection() {
 
 void connectToMqtt()
 {
+    mqttClient.loop();
     mqttClient.setServer(mqttBroker, mqttPort);
     // attempts = 0;
     // while (attempts <= maxConnectionAttempts && !mqttClient.connected())
@@ -283,12 +282,7 @@ void connectToWiFi()
 
 void sendOutViaMqtt(long long timestamp, float flow)
 {
-    mqttClient.setServer(mqttBroker, mqttPort);
-    mqttClient.loop();
-    if (!mqttClient.connected())
-    {
-        mqttClient.connect(mqttClientId, mqttUser, mqttPassword);
-    }
+    connectToMqtt();
 
     if (mqttClient.connected())
 
