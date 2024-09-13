@@ -66,6 +66,7 @@
 #include <ArduinoJson.h>
 #include <ezTime.h>
 #include <PubSubClient.h>
+#include <ESP32Ping.h>
 #endif
 
 //  █ █ █▀▀ █▀▀ █▀▄   █▀▀ █▀█ █▀▄ █▀▀   █▀▄ █▀▀ █▀▀ ▀█▀ █▀█
@@ -118,11 +119,11 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 #endif
 
 #ifdef USE_WIFI
-struct DataPoint
-{
-    unsigned long long timestamp;
-    float flow;
-};
+// struct DataPoint
+// {
+//     unsigned long long timestamp;
+//     float flow;
+// };
 // boolean sendOutDataViaWifi = false;
 boolean timeSynched = false;
 boolean locationSet = false;
@@ -174,14 +175,16 @@ void printLocalTime()
 }
 
 #ifdef USE_WIFI
-bool checkInternetConnection()
-{
-    HTTPClient http;
-    http.begin("http://www.google.com");
-    int httpCode = http.GET();
-    http.end();
-
-    return (httpCode > 0 && httpCode == HTTP_CODE_OK);
+bool checkInternetConnection() {
+  // Attempt to resolve a known domain name
+  IPAddress ip;
+  if (WiFi.hostByName("www.google.com", ip)) {
+    // Perform a ping test to the resolved IP address with a 2-second timeout
+    if (Ping.ping(ip, 1)) {  // 5 pings, 2000 ms timeout
+      return true;
+    }
+  }
+  return false;
 }
 
 void connectToMqtt()
