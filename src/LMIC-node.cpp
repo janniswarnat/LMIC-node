@@ -179,10 +179,7 @@ bool checkInternetConnection() {
   // Attempt to resolve a known domain name
   IPAddress ip;
   if (WiFi.hostByName("www.google.com", ip)) {
-    // Perform a ping test to the resolved IP address with a 2-second timeout
-    if (Ping.ping(ip, 1)) {  // 5 pings, 2000 ms timeout
-      return true;
-    }
+    return true;
   }
   return false;
 }
