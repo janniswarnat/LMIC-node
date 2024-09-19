@@ -139,6 +139,7 @@ const char *mqttUser = MQTT_USER;
 const char *mqttPassword = MQTT_PASSWORD;
 const char *mqttClientId = MQTT_CLIENT_ID;
 const char *mqttTopic = MQTT_TOPIC;
+unsigned long long startOfCurrentTapEvent = 0;
 const char *openwareUniqueSensorId = OPENWARE_UNIQUE_SENSOR_ID;
 const char *openwareHumanReadableSensorName = OPENWARE_HUMAN_READABLE_SENSOR_NAME;
 const char *openWareSourceTag = OPENWARE_SOURCE_TAG;
@@ -191,8 +192,8 @@ bool checkInternetConnection()
 
 void connectToMqtt()
 {
-    // mqttClient.loop();
     mqttClient.setServer(mqttBroker, mqttPort);
+    mqttClient.setKeepAlive(30);
     // attempts = 0;
     // while (attempts <= maxConnectionAttempts && !mqttClient.connected())
     if (!mqttClient.connected() && checkInternetConnection())
@@ -208,11 +209,10 @@ void connectToMqtt()
         Serial.println(mqttUser);
         Serial.print("Password: ");
         Serial.println(mqttPassword);
-        
+
         if (mqttClient.connect(mqttClientId, mqttUser, mqttPassword))
         {
             Serial.println("connected to MQTT broker");
-           
         }
         else
         {
@@ -223,7 +223,6 @@ void connectToMqtt()
             // delay(100);
         }
     }
-    mqttClient.loop();
 }
 
 void connectToWiFi()
@@ -300,7 +299,7 @@ void connectToWiFi()
 }
 #endif
 
-void sendOutViaMqtt(long long timestamp, float flow)
+void sendOutViaMqtt(long long timestamp, long long eventStart, float flow)
 {
     connectToMqtt();
 
@@ -326,12 +325,17 @@ void sendOutViaMqtt(long long timestamp, float flow)
         valueType["type"] = "Number";
         //}
 
+        JsonObject valueType = valueTypes.createNestedObject();
+        valueType["name"] = "eventStart";
+        valueType["type"] = "Number";
+
         JsonArray values = jsonPayload.createNestedArray("values");
 
         JsonObject value = values.createNestedObject();
         value["date"] = timestamp;
         JsonArray value_values = value.createNestedArray("value");
         value_values.add(flow);
+        value_values.add(eventStart);
 
         // Convert JSON object into a string
         String jsonString;
@@ -1098,7 +1102,7 @@ void collectFlowEachSecond()
     float flow = (float)((digitalValue2 - minADCValueFlow) * 30) / (float)(maxADCValueFlow - minADCValueFlow);
 
     flow = max(0, flow); // flow can be negative, especially when sensor is turned on
-
+    float roundedFlow = roundf(flow * 10) / 10 / 60;
     Serial.print("Analog 0 Digital Value: ");
     Serial.print(digitalValue0);
     Serial.print(", Temperature: ");
@@ -1124,10 +1128,21 @@ void collectFlowEachSecond()
     // Serial.print("dataPoints[wifiSendOutIntervalCounter].timestamp: ");
     // Serial.println(dataPoints[wifiSendOutIntervalCounter].timestamp);
     // dataPoints[wifiSendOutIntervalCounter].flow = roundf(flow * 10) / 10 / 60;
-    sendOutViaMqtt(nowMilli, roundf(flow * 10) / 10 / 60);
+    if (roundedFlow > 0)
+    {
+        if (startOfCurrentTapEvent == 0)
+        {
+            startOfCurrentTapEvent = nowMilli;
+        }
+        sendOutViaMqtt(nowMilli, startOfCurrentTapEvent, roundedFlow);
+    }
+    else
+    {
+        startOfCurrentTapEvent = 0;
+    }
 #endif
 
-    litersInLoraSendOutInterval += roundf(flow * 10) / 10 / 60;
+    litersInLoraSendOutInterval += roundedFlow;
 
     Serial.print("litersInLoraSendOutInterval: ");
     Serial.println(litersInLoraSendOutInterval, 2);
@@ -1187,7 +1202,7 @@ void processWork(ostime_t doWorkJobTimeStamp)
     // This is where the main work is performed like
     // reading sensor and GPS data and schedule uplink
     // messages if anything needs to be transmitted.
-
+    mqttClient.loop();
 #ifdef USE_ADC
     collectFlowEachSecond();
 #endif
