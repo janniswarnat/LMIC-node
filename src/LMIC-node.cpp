@@ -194,6 +194,7 @@ void connectToMqtt()
 {
     mqttClient.setServer(mqttBroker, mqttPort);
     mqttClient.setKeepAlive(30);
+    mqttClient.setBufferSize(512);
     // attempts = 0;
     // while (attempts <= maxConnectionAttempts && !mqttClient.connected())
     if (!mqttClient.connected() && checkInternetConnection())
@@ -301,6 +302,7 @@ void connectToWiFi()
 
 void sendOutViaMqtt(long long timestamp, long long eventStart, float flow)
 {
+    Serial.println("Trying to send out via MQTT");
     connectToMqtt();
 
     if (mqttClient.connected())
@@ -320,14 +322,14 @@ void sendOutViaMqtt(long long timestamp, long long eventStart, float flow)
 
         // for (int i = 0; i < 60; i++)
         //{
-        JsonObject valueType = valueTypes.createNestedObject();
-        valueType["name"] = "liters";
-        valueType["type"] = "Number";
+        JsonObject valueTypeFlow = valueTypes.createNestedObject();
+        valueTypeFlow["name"] = "liters";
+        valueTypeFlow["type"] = "Number";
         //}
 
-        JsonObject valueType = valueTypes.createNestedObject();
-        valueType["name"] = "eventStart";
-        valueType["type"] = "Number";
+        JsonObject valueTypeEventStart = valueTypes.createNestedObject();
+        valueTypeEventStart["name"] = "eventStart";
+        valueTypeEventStart["type"] = "Number";
 
         JsonArray values = jsonPayload.createNestedArray("values");
 
@@ -340,10 +342,15 @@ void sendOutViaMqtt(long long timestamp, long long eventStart, float flow)
         // Convert JSON object into a string
         String jsonString;
         serializeJson(jsonPayload, jsonString);
-        String jsonPrettyString;
-        serializeJsonPretty(jsonPayload, jsonPrettyString);
+        // String jsonPrettyString;
+        // serializeJsonPretty(jsonPayload, jsonPrettyString);
+        // Serial.println(mqttTopic);
         // Serial.println(jsonPrettyString);
-        mqttClient.publish(mqttTopic, jsonString.c_str());
+        bool result = mqttClient.publish(mqttTopic, jsonString.c_str());
+        // Serial.print("Message length: ");
+        // Serial.print(strlen(jsonString.c_str()));
+        Serial.print("Publish result: ");
+        Serial.println(result ? "Success" : "Failure");
     }
 }
 
@@ -1103,16 +1110,20 @@ void collectFlowEachSecond()
 
     flow = max(0, flow); // flow can be negative, especially when sensor is turned on
     float roundedFlow = roundf(flow * 10) / 10 / 60;
-    Serial.print("Analog 0 Digital Value: ");
-    Serial.print(digitalValue0);
-    Serial.print(", Temperature: ");
-    Serial.print(temperature, 1);
-    Serial.println(" C");
+    // Serial.print("Analog 0 Digital Value: ");
+    // Serial.print(digitalValue0);
+    // Serial.print(", Temperature: ");
+    // Serial.print(temperature, 1);
+    // Serial.println(" C");
 
-    Serial.print("Analog 2 Digital Value: ");
-    Serial.print(digitalValue2);
-    Serial.print(", Flow: ");
-    Serial.print(flow, 0);
+    // Serial.print("Analog 2 Digital Value: ");
+    // Serial.print(digitalValue2);
+    // Serial.print(", Flow: ");
+    // Serial.print(flow, 0);
+    // Serial.println(" l/min");
+
+    Serial.print("Rounded flow: ");
+    Serial.print(roundedFlow);
     Serial.println(" l/min");
 
 #ifdef USE_WIFI
