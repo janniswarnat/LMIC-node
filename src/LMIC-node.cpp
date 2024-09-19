@@ -1149,6 +1149,11 @@ void collectFlowEachSecond()
     }
     else
     {
+        // event ends, send out first 0.0 after event
+        if (startOfCurrentTapEvent > 0)
+        {
+            sendOutViaMqtt(nowMilli, startOfCurrentTapEvent, roundedFlow);
+        }
         startOfCurrentTapEvent = 0;
     }
 #endif
