@@ -101,7 +101,7 @@ const uint16_t maxTemperatureSetInKeyenceMenu = 100;
 const uint16_t maxFlowSetInKeyenceMenu = 30;
 // Adjust after using Keyence simulation (min / max values) to determine ADC values
 const uint16_t minADCValueTemperature = 6441;  // FD-H20, FD-H32 was: 6471
-const uint16_t minADCValueFlow = 6242;         // FD-H20, FD-H32 was: 6266
+const uint16_t minADCValueFlow = 6457;         // FD-H20, was: 6242 FD-H32 was: 6266
 const uint16_t maxADCValueTemperature = 32142; // FD-H20, FD-H32 was: 32157
 const uint16_t maxADCValueFlow = 31910;        // FD-H20, FD-H32 was: 31944
 #endif
@@ -143,6 +143,8 @@ unsigned long long startOfCurrentTapEvent = 0;
 const char *openwareUniqueSensorId = OPENWARE_UNIQUE_SENSOR_ID;
 const char *openwareHumanReadableSensorName = OPENWARE_HUMAN_READABLE_SENSOR_NAME;
 const char *openWareSourceTag = OPENWARE_SOURCE_TAG;
+boolean wifiReconnection = false;
+boolean mqttReconnection = false;
 
 Timezone Berlin;
 
@@ -156,6 +158,7 @@ void WiFiEvent(WiFiEvent_t event)
     {
     case SYSTEM_EVENT_STA_DISCONNECTED:
         Serial.println("WiFi lost connection. Attempting to reconnect...");
+        wifiReconnection = true;
         WiFi.begin(ssid, password);
         break;
     default:
@@ -199,6 +202,7 @@ void connectToMqtt()
     // while (attempts <= maxConnectionAttempts && !mqttClient.connected())
     if (!mqttClient.connected() && checkInternetConnection())
     {
+        mqttReconnection = true;
         Serial.print("Connecting to MQTT Broker...");
         Serial.print("Broker: ");
         Serial.println(mqttBroker);
@@ -234,6 +238,7 @@ void connectToWiFi()
         serial.print("Connecting to ");
         Serial.println(ssid);
         WiFi.onEvent(WiFiEvent);
+        wifiReconnection = true;
         WiFi.begin(ssid, password);
     }
     // uint8_t maxConnectionAttempts = 255;
@@ -295,12 +300,13 @@ void connectToWiFi()
     {
         serial.println("");
         serial.println("Failed to connect to WiFi, retry...");
+        wifiReconnection = true;
         WiFi.begin(ssid, password);
     }
 }
 #endif
 
-void sendOutViaMqtt(long long timestamp, long long eventStart, float flow)
+void sendOutViaMqtt(long long timestamp, long long tapEventStart, float flow)
 {
     Serial.println("Trying to send out via MQTT");
     connectToMqtt();
@@ -323,13 +329,25 @@ void sendOutViaMqtt(long long timestamp, long long eventStart, float flow)
         // for (int i = 0; i < 60; i++)
         //{
         JsonObject valueTypeFlow = valueTypes.createNestedObject();
-        valueTypeFlow["name"] = "liters";
+        valueTypeFlow["name"] = "flow";
+        valueTypeFlow["unit"] = "L";
         valueTypeFlow["type"] = "Number";
         //}
 
-        JsonObject valueTypeEventStart = valueTypes.createNestedObject();
-        valueTypeEventStart["name"] = "eventStart";
-        valueTypeEventStart["type"] = "Number";
+        JsonObject valueTypeTapEventStart = valueTypes.createNestedObject();
+        valueTypeTapEventStart["name"] = "tapEventStart";
+        valueTypeTapEventStart["unit"] = "ms";
+        valueTypeTapEventStart["type"] = "Number";
+
+        JsonObject valueTypeWifiReconnection = valueTypes.createNestedObject();
+        valueTypeWifiReconnection["name"] = "wifiReconnection";
+        valueTypeWifiReconnection["unit"] = "";
+        valueTypeWifiReconnection["type"] = "Boolean";
+
+        JsonObject valueTypeMqttReconnection = valueTypes.createNestedObject();
+        valueTypeMqttReconnection["name"] = "mqttReconnection";
+        valueTypeMqttReconnection["unit"] = "";
+        valueTypeMqttReconnection["type"] = "Boolean";
 
         JsonArray values = jsonPayload.createNestedArray("values");
 
@@ -337,7 +355,9 @@ void sendOutViaMqtt(long long timestamp, long long eventStart, float flow)
         value["date"] = timestamp;
         JsonArray value_values = value.createNestedArray("value");
         value_values.add(flow);
-        value_values.add(eventStart);
+        value_values.add(tapEventStart);
+        value_values.add(wifiReconnection);
+        value_values.add(mqttReconnection);
 
         // Convert JSON object into a string
         String jsonString;
@@ -347,6 +367,11 @@ void sendOutViaMqtt(long long timestamp, long long eventStart, float flow)
         // Serial.println(mqttTopic);
         // Serial.println(jsonPrettyString);
         bool result = mqttClient.publish(mqttTopic, jsonString.c_str());
+        if (result)
+        {
+            wifiReconnection = false;
+            mqttReconnection = false;
+        }
         // Serial.print("Message length: ");
         // Serial.print(strlen(jsonString.c_str()));
         Serial.print("Publish result: ");
@@ -1116,11 +1141,11 @@ void collectFlowEachSecond()
     // Serial.print(temperature, 1);
     // Serial.println(" C");
 
-    // Serial.print("Analog 2 Digital Value: ");
-    // Serial.print(digitalValue2);
-    // Serial.print(", Flow: ");
-    // Serial.print(flow, 0);
-    // Serial.println(" l/min");
+    Serial.print("Analog 2 Digital Value: ");
+    Serial.print(digitalValue2);
+    Serial.print(", Flow: ");
+    Serial.print(flow, 0);
+    Serial.print(" l/min ");
 
     Serial.print("Rounded flow: ");
     Serial.print(roundedFlow);
@@ -1149,12 +1174,11 @@ void collectFlowEachSecond()
     }
     else
     {
-        // event ends, send out first 0.0 after event
-        if (startOfCurrentTapEvent > 0)
+        startOfCurrentTapEvent = 0;
+        if (startOfCurrentTapEvent > 0 || wifiReconnection || mqttReconnection)
         {
             sendOutViaMqtt(nowMilli, startOfCurrentTapEvent, roundedFlow);
         }
-        startOfCurrentTapEvent = 0;
     }
 #endif
 
