@@ -143,8 +143,8 @@ unsigned long long startOfCurrentTapEvent = 0;
 const char *openwareUniqueSensorId = OPENWARE_UNIQUE_SENSOR_ID;
 const char *openwareHumanReadableSensorName = OPENWARE_HUMAN_READABLE_SENSOR_NAME;
 const char *openWareSourceTag = OPENWARE_SOURCE_TAG;
-boolean wifiReconnection = false;
-boolean mqttReconnection = false;
+uint8_t wifiReconnection = 0;
+uint8_t mqttReconnection = 0;
 
 Timezone Berlin;
 
@@ -158,7 +158,7 @@ void WiFiEvent(WiFiEvent_t event)
     {
     case SYSTEM_EVENT_STA_DISCONNECTED:
         Serial.println("WiFi lost connection. Attempting to reconnect...");
-        wifiReconnection = true;
+        wifiReconnection = 1;
         WiFi.begin(ssid, password);
         break;
     default:
@@ -202,7 +202,7 @@ void connectToMqtt()
     // while (attempts <= maxConnectionAttempts && !mqttClient.connected())
     if (!mqttClient.connected() && checkInternetConnection())
     {
-        mqttReconnection = true;
+        mqttReconnection = 1;
         Serial.print("Connecting to MQTT Broker...");
         Serial.print("Broker: ");
         Serial.println(mqttBroker);
@@ -238,7 +238,7 @@ void connectToWiFi()
         serial.print("Connecting to ");
         Serial.println(ssid);
         WiFi.onEvent(WiFiEvent);
-        wifiReconnection = true;
+        wifiReconnection = 1;
         WiFi.begin(ssid, password);
     }
     // uint8_t maxConnectionAttempts = 255;
@@ -300,7 +300,7 @@ void connectToWiFi()
     {
         serial.println("");
         serial.println("Failed to connect to WiFi, retry...");
-        wifiReconnection = true;
+        wifiReconnection = 1;
         WiFi.begin(ssid, password);
     }
 }
@@ -342,12 +342,12 @@ void sendOutViaMqtt(long long timestamp, long long tapEventStart, float flow)
         JsonObject valueTypeWifiReconnection = valueTypes.createNestedObject();
         valueTypeWifiReconnection["name"] = "wifiReconnection";
         valueTypeWifiReconnection["unit"] = "";
-        valueTypeWifiReconnection["type"] = "Boolean";
+        valueTypeWifiReconnection["type"] = "Number";
 
         JsonObject valueTypeMqttReconnection = valueTypes.createNestedObject();
         valueTypeMqttReconnection["name"] = "mqttReconnection";
         valueTypeMqttReconnection["unit"] = "";
-        valueTypeMqttReconnection["type"] = "Boolean";
+        valueTypeMqttReconnection["type"] = "Number";
 
         JsonArray values = jsonPayload.createNestedArray("values");
 
@@ -369,8 +369,8 @@ void sendOutViaMqtt(long long timestamp, long long tapEventStart, float flow)
         bool result = mqttClient.publish(mqttTopic, jsonString.c_str());
         if (result)
         {
-            wifiReconnection = false;
-            mqttReconnection = false;
+            wifiReconnection = 0;
+            mqttReconnection = 0;
         }
         // Serial.print("Message length: ");
         // Serial.print(strlen(jsonString.c_str()));
@@ -1174,7 +1174,7 @@ void collectFlowEachSecond()
     }
     else
     {
-        if (startOfCurrentTapEvent > 0 || wifiReconnection || mqttReconnection)
+        if (startOfCurrentTapEvent > 0 || wifiReconnection == 1 || mqttReconnection == 1)
         {
             sendOutViaMqtt(nowMilli, startOfCurrentTapEvent, roundedFlow);
         }
