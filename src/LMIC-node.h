@@ -86,6 +86,9 @@ enum class ActivationMode {OTAA, ABP};
     #include "../keyfiles/bearer-token.h"
     #include "../keyfiles/mqtt-credentials.h"
 #endif
+#ifdef USE_ADC
+    #include "../keyfiles/adc-settings.h"
+#endif
 
     
 #if defined(ABP_ACTIVATION) && defined(OTAA_ACTIVATION)

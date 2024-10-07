@@ -97,13 +97,13 @@ uint16_t static loraSendOutIntervalCounter = 0;
 Adafruit_ADS1115 ads1;
 float static litersInLoraSendOutInterval = 0;
 // Adjust according to your settings in the Keyence sensor menu
-const uint16_t maxTemperatureSetInKeyenceMenu = 100;
-const uint16_t maxFlowSetInKeyenceMenu = 30;
+//const uint16_t maxTemperatureSetInKeyenceMenu = 100;
+const uint16_t maxFlowSetInKeyenceMenu = MAX_FLOW_KEYENCE;
 // Adjust after using Keyence simulation (min / max values) to determine ADC values
-const uint16_t minADCValueTemperature = 6441;  // FD-H20, FD-H32 was: 6471
-const uint16_t minADCValueFlow = 6457;         // FD-H20, was: 6242 FD-H32 was: 6266
-const uint16_t maxADCValueTemperature = 32142; // FD-H20, FD-H32 was: 32157
-const uint16_t maxADCValueFlow = 31910;        // FD-H20, FD-H32 was: 31944
+//const uint16_t minADCValueTemperature = 6441;  // FD-H20, FD-H32 was: 6471
+const uint16_t minADCValueFlow = MIN_ADC_VALUE_FLOW;         // FD-H20, was: 6242 FD-H32 was: 6266
+//const uint16_t maxADCValueTemperature = 32142; // FD-H20, FD-H32 was: 32157
+const uint16_t maxADCValueFlow = MAX_ADC_VALUE_FLOW;        // FD-H20, FD-H32 was: 31944
 #endif
 
 #ifdef SEND_ESPNOW
@@ -1127,10 +1127,10 @@ static volatile uint16_t counter_ = 0;
 #ifdef USE_ADC
 void collectFlowEachSecond()
 {
-    int16_t digitalValue0 = min(ads1.readADC_SingleEnded(0), maxADCValueTemperature);
+    //int16_t digitalValue0 = min(ads1.readADC_SingleEnded(0), maxADCValueTemperature);
     int16_t digitalValue2 = min(ads1.readADC_SingleEnded(2), maxADCValueFlow);
 
-    float temperature = (float)((digitalValue0 - minADCValueTemperature) * 100) / (float)(maxADCValueTemperature - minADCValueTemperature);
+    //float temperature = (float)((digitalValue0 - minADCValueTemperature) * 100) / (float)(maxADCValueTemperature - minADCValueTemperature);
     float flow = (float)((digitalValue2 - minADCValueFlow) * 30) / (float)(maxADCValueFlow - minADCValueFlow);
 
     flow = max(0, flow); // flow can be negative, especially when sensor is turned on
@@ -1174,11 +1174,11 @@ void collectFlowEachSecond()
     }
     else
     {
-        startOfCurrentTapEvent = 0;
         if (startOfCurrentTapEvent > 0 || wifiReconnection || mqttReconnection)
         {
             sendOutViaMqtt(nowMilli, startOfCurrentTapEvent, roundedFlow);
         }
+        startOfCurrentTapEvent = 0;
     }
 #endif
 

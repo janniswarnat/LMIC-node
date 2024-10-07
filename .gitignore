@@ -16,6 +16,7 @@ keyfiles/**
 !keyfiles/wifi-credentials_example.h
 !keyfiles/bearer-token_example.h
 !keyfiles/mqtt-credentials_example.h
+!keyfiles/adc-settings_example.h
 
 # Exclude any LoRaWAN key files with following pattern
 *lorawan-keys.h
