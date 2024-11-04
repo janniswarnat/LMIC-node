@@ -156,6 +156,7 @@ void WiFiEvent(WiFiEvent_t event)
 {
     switch (event)
     {
+    Serial.println("Event fired " + String(event));
     case SYSTEM_EVENT_STA_DISCONNECTED:
         Serial.println("WiFi lost connection. Attempting to reconnect...");
         wifiReconnection = 1;
@@ -230,12 +231,34 @@ void connectToMqtt()
     }
 }
 
+void listVisibleNetworks() {
+    int numNetworks = WiFi.scanNetworks();
+    Serial.println("Scan completed.");
+    if (numNetworks == 0) {
+        Serial.println("No networks found.");
+    } else {
+        Serial.print(numNetworks);
+        Serial.println(" networks found:");
+        for (int i = 0; i < numNetworks; ++i) {
+            // Print SSID and RSSI for each network found
+            Serial.print("SSID: ");
+            Serial.print(WiFi.SSID(i));
+            Serial.print(" | Signal Strength (RSSI): ");
+            Serial.print(WiFi.RSSI(i));
+            Serial.println(" dBm");
+        }
+    }
+}
+
 void connectToWiFi()
 {
     if (WiFi.status() != WL_CONNECTED)
     {
         // Attempt to connect to Wifi network:
-        serial.print("Connecting to ");
+        listVisibleNetworks();
+        serial.print("MAC address ");
+        serial.print(WiFi.macAddress());
+        serial.print(" connecting to ");
         Serial.println(ssid);
         WiFi.onEvent(WiFiEvent);
         wifiReconnection = 1;
@@ -1131,7 +1154,7 @@ void collectFlowEachSecond()
     int16_t digitalValue2 = min(ads1.readADC_SingleEnded(2), maxADCValueFlow);
 
     //float temperature = (float)((digitalValue0 - minADCValueTemperature) * 100) / (float)(maxADCValueTemperature - minADCValueTemperature);
-    float flow = (float)((digitalValue2 - minADCValueFlow) * 30) / (float)(maxADCValueFlow - minADCValueFlow);
+    float flow = (float)((digitalValue2 - minADCValueFlow) * MAX_FLOW_KEYENCE) / (float)(maxADCValueFlow - minADCValueFlow);
 
     flow = max(0, flow); // flow can be negative, especially when sensor is turned on
     float roundedFlow = roundf(flow * 10) / 10 / 60;
@@ -1149,7 +1172,7 @@ void collectFlowEachSecond()
 
     Serial.print("Rounded flow: ");
     Serial.print(roundedFlow);
-    Serial.println(" l/min");
+    Serial.println(" l/sec");
 
 #ifdef USE_WIFI
     unsigned long now = UTC.now();
